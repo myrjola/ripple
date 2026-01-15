@@ -9,192 +9,195 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Meditation Timer">
     <link rel="manifest" href="manifest.json">
-    <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><circle cx='90' cy='90' r='85' fill='%23667eea'/></svg>">
+    <link rel="apple-touch-icon"
+          href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><circle cx='90' cy='90' r='85' fill='%23667eea'/></svg>">
     <title>Meditation Timer</title>
 </head>
 <body>
-    <h1>Meditation Timer</h1>
-    <div id="timer">10</div>
-    <button id="startBtn">Start 10s Timer</button>
-    <button id="stopBtn" disabled>Stop</button>
-    <p id="status">Ready</p>
+<h1>Meditation Timer</h1>
+<div id="timer">10</div>
+<button id="startBtn">Start 10s Timer</button>
+<button id="stopBtn" disabled>Stop</button>
+<p id="status">Ready</p>
 
-    <script>
-        let audioContext;
-        let oscillator;
-        let gain;
-        let timerInterval;
-        let timeRemaining = 10;
-        const timerDisplay = document.getElementById('timer');
-        const startBtn = document.getElementById('startBtn');
-        const stopBtn = document.getElementById('stopBtn');
-        const statusDisplay = document.getElementById('status');
+<script>
+    let audioContext;
+    let oscillator;
+    let gain;
+    let timerInterval;
+    let timeRemaining = 10;
+    const timerDisplay = document.getElementById('timer');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const statusDisplay = document.getElementById('status');
 
-        async function setupAudioSession() {
-            if ('audioSession' in navigator) {
-                try {
-                    // Configure audio session for playback
-                    await navigator.audioSession.addEventListener?.('statechange', (event) => {
-                        console.log('Audio session state changed:', event.state);
-                    });
+    async function setupAudioSession() {
+        if ('audioSession' in navigator) {
+            try {
+                // Configure audio session for playback
+                await navigator.audioSession.addEventListener?.('statechange', (event) => {
+                    console.log('Audio session state changed:', event.state);
+                });
 
-                    // Set audio session category to playback to allow background audio
-                    if (navigator.audioSession.setCategory) {
-                        navigator.audioSession.setCategory('playback');
-                    }
-
-                    console.log('Audio Session API initialized');
-                } catch (err) {
-                    console.log('Audio Session API setup failed:', err);
+                // Set audio session category to playback to allow background audio
+                if (navigator.audioSession.setCategory) {
+                    navigator.audioSession.setCategory('playback');
                 }
+
+                navigator.audioSession.type = 'playback';
+
+                console.log('Audio Session API initialized');
+            } catch (err) {
+                console.log('Audio Session API setup failed:', err);
             }
         }
+    }
 
-        function initAudioContext() {
-            if (!audioContext) {
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            }
-
-            if (audioContext.state === 'suspended') {
-                audioContext.resume();
-            }
+    function initAudioContext() {
+        if (!audioContext) {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
         }
 
-        function updateMediaSession() {
-            if ('mediaSession' in navigator) {
-                navigator.mediaSession.metadata = new MediaMetadata({
-                    title: 'Meditation Timer',
-                    artist: 'Ripple',
-                    artwork: [
-                        {
-                            src: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><circle cx="48" cy="48" r="45" fill="%23667eea"/></svg>',
-                            sizes: '96x96',
-                            type: 'image/svg+xml'
-                        }
-                    ]
-                });
-
-                navigator.mediaSession.playbackState = 'playing';
-
-                navigator.mediaSession.setActionHandler('pause', () => {
-                    stopTimer();
-                });
-
-                navigator.mediaSession.setActionHandler('play', () => {
-                    startTimer();
-                });
-            }
+        if (audioContext.state === 'suspended') {
+            audioContext.resume();
         }
+    }
 
-        function startSilentAudio() {
-            initAudioContext();
+    function updateMediaSession() {
+        if ('mediaSession' in navigator) {
+            navigator.mediaSession.metadata = new MediaMetadata({
+                title: 'Meditation Timer',
+                artist: 'Ripple',
+                artwork: [
+                    {
+                        src: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><circle cx="48" cy="48" r="45" fill="%23667eea"/></svg>',
+                        sizes: '96x96',
+                        type: 'image/svg+xml'
+                    }
+                ]
+            });
 
-            // Create a silent oscillator to keep the app awake
-            oscillator = audioContext.createOscillator();
-            gain = audioContext.createGain();
+            navigator.mediaSession.playbackState = 'playing';
 
-            oscillator.connect(gain);
-            gain.connect(audioContext.destination);
+            navigator.mediaSession.setActionHandler('pause', () => {
+                stopTimer();
+            });
 
-            // Set gain to 0 so it's silent
-            gain.gain.setValueAtTime(0, audioContext.currentTime);
-
-            oscillator.frequency.value = 20;
-            oscillator.start();
-        }
-
-        function stopSilentAudio() {
-            if (oscillator) {
-                oscillator.stop();
-                oscillator = null;
-                gain = null;
-            }
-        }
-
-        function playBell() {
-            initAudioContext();
-            const now = audioContext.currentTime;
-            const bellDuration = 2;
-
-            // Create multiple oscillators for a rich bell sound
-            const frequencies = [440, 660, 880]; // A4, E5, A5
-            const oscillators = [];
-            const gains = [];
-
-            frequencies.forEach((freq, index) => {
-                const osc = audioContext.createOscillator();
-                const g = audioContext.createGain();
-
-                osc.frequency.value = freq;
-                osc.connect(g);
-                g.connect(audioContext.destination);
-
-                // Decay envelope - starts loud and fades out
-                g.gain.setValueAtTime(0.3 / (index + 1), now);
-                g.gain.exponentialRampToValueAtTime(0.01, now + bellDuration);
-
-                osc.start(now);
-                osc.stop(now + bellDuration);
-
-                oscillators.push(osc);
-                gains.push(g);
+            navigator.mediaSession.setActionHandler('play', () => {
+                startTimer();
             });
         }
+    }
 
-        async function startTimer() {
-            initAudioContext();
-            await setupAudioSession();
-            updateMediaSession();
-            playBell();
-            startSilentAudio();
+    function startSilentAudio() {
+        initAudioContext();
 
-            timeRemaining = 10;
+        // Create a silent oscillator to keep the app awake
+        oscillator = audioContext.createOscillator();
+        gain = audioContext.createGain();
+
+        oscillator.connect(gain);
+        gain.connect(audioContext.destination);
+
+        // Set gain to 0 so it's silent
+        gain.gain.setValueAtTime(0, audioContext.currentTime);
+
+        oscillator.frequency.value = 20;
+        oscillator.start();
+    }
+
+    function stopSilentAudio() {
+        if (oscillator) {
+            oscillator.stop();
+            oscillator = null;
+            gain = null;
+        }
+    }
+
+    function playBell() {
+        initAudioContext();
+        const now = audioContext.currentTime;
+        const bellDuration = 2;
+
+        // Create multiple oscillators for a rich bell sound
+        const frequencies = [440, 660, 880]; // A4, E5, A5
+        const oscillators = [];
+        const gains = [];
+
+        frequencies.forEach((freq, index) => {
+            const osc = audioContext.createOscillator();
+            const g = audioContext.createGain();
+
+            osc.frequency.value = freq;
+            osc.connect(g);
+            g.connect(audioContext.destination);
+
+            // Decay envelope - starts loud and fades out
+            g.gain.setValueAtTime(0.3 / (index + 1), now);
+            g.gain.exponentialRampToValueAtTime(0.01, now + bellDuration);
+
+            osc.start(now);
+            osc.stop(now + bellDuration);
+
+            oscillators.push(osc);
+            gains.push(g);
+        });
+    }
+
+    async function startTimer() {
+        initAudioContext();
+        await setupAudioSession();
+        updateMediaSession();
+        playBell();
+        startSilentAudio();
+
+        timeRemaining = 10;
+        timerDisplay.textContent = timeRemaining;
+        statusDisplay.textContent = 'Timer running...';
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+
+        timerInterval = setInterval(() => {
+            timeRemaining--;
             timerDisplay.textContent = timeRemaining;
-            statusDisplay.textContent = 'Timer running...';
-            startBtn.disabled = true;
-            stopBtn.disabled = false;
 
-            timerInterval = setInterval(() => {
-                timeRemaining--;
-                timerDisplay.textContent = timeRemaining;
-
-                if (timeRemaining <= 0) {
-                    clearInterval(timerInterval);
-                    stopSilentAudio();
-                    playBell();
-                    if ('mediaSession' in navigator) {
-                        navigator.mediaSession.playbackState = 'paused';
-                    }
-                    statusDisplay.textContent = 'Time up!';
-                    startBtn.disabled = false;
-                    stopBtn.disabled = true;
-                    timerDisplay.textContent = '0';
+            if (timeRemaining <= 0) {
+                clearInterval(timerInterval);
+                stopSilentAudio();
+                playBell();
+                if ('mediaSession' in navigator) {
+                    navigator.mediaSession.playbackState = 'paused';
                 }
-            }, 1000);
-        }
-
-        function stopTimer() {
-            clearInterval(timerInterval);
-            stopSilentAudio();
-            if ('mediaSession' in navigator) {
-                navigator.mediaSession.playbackState = 'paused';
+                statusDisplay.textContent = 'Time up!';
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+                timerDisplay.textContent = '0';
             }
-            timeRemaining = 10;
-            timerDisplay.textContent = timeRemaining;
-            statusDisplay.textContent = 'Stopped';
-            startBtn.disabled = false;
-            stopBtn.disabled = true;
-        }
+        }, 1000);
+    }
 
-        startBtn.addEventListener('click', () => startTimer().catch(console.error));
-        stopBtn.addEventListener('click', stopTimer);
-
-        // Register service worker
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('sw.js').catch(() => {
-                // Service worker registration failed, but app will still work
-            });
+    function stopTimer() {
+        clearInterval(timerInterval);
+        stopSilentAudio();
+        if ('mediaSession' in navigator) {
+            navigator.mediaSession.playbackState = 'paused';
         }
-    </script>
+        timeRemaining = 10;
+        timerDisplay.textContent = timeRemaining;
+        statusDisplay.textContent = 'Stopped';
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+    }
+
+    startBtn.addEventListener('click', () => startTimer().catch(console.error));
+    stopBtn.addEventListener('click', stopTimer);
+
+    // Register service worker
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw.js').catch(() => {
+            // Service worker registration failed, but app will still work
+        });
+    }
+</script>
 </body>
 </html>
