@@ -30,6 +30,26 @@
         const stopBtn = document.getElementById('stopBtn');
         const statusDisplay = document.getElementById('status');
 
+        async function setupAudioSession() {
+            if ('audioSession' in navigator) {
+                try {
+                    // Configure audio session for playback
+                    await navigator.audioSession.addEventListener?.('statechange', (event) => {
+                        console.log('Audio session state changed:', event.state);
+                    });
+
+                    // Set audio session category to playback to allow background audio
+                    if (navigator.audioSession.setCategory) {
+                        navigator.audioSession.setCategory('playback');
+                    }
+
+                    console.log('Audio Session API initialized');
+                } catch (err) {
+                    console.log('Audio Session API setup failed:', err);
+                }
+            }
+        }
+
         function initAudioContext() {
             if (!audioContext) {
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -121,8 +141,9 @@
             });
         }
 
-        function startTimer() {
+        async function startTimer() {
             initAudioContext();
+            await setupAudioSession();
             updateMediaSession();
             playBell();
             startSilentAudio();
@@ -165,7 +186,7 @@
             stopBtn.disabled = true;
         }
 
-        startBtn.addEventListener('click', startTimer);
+        startBtn.addEventListener('click', () => startTimer().catch(console.error));
         stopBtn.addEventListener('click', stopTimer);
 
         // Register service worker
