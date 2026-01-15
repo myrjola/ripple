@@ -21,210 +21,218 @@
 <p id="status">Ready</p>
 
 <script>
-    const TIMER_DURATION = 10;
-    let audioContext;
-    let oscillator;
-    let gain;
-    let timerInterval;
-    let timeRemaining = TIMER_DURATION;
-    const timerDisplay = document.getElementById('timer');
-    const startBtn = document.getElementById('startBtn');
-    const stopBtn = document.getElementById('stopBtn');
-    const statusDisplay = document.getElementById('status');
+class MeditationTimer {
+    static DURATION = 10;
 
-    async function setupAudioSession() {
+    #audioContext = null;
+    #oscillator = null;
+    #gain = null;
+    #intervalId = null;
+    #timeRemaining = MeditationTimer.DURATION;
+
+    #elements;
+
+    constructor() {
+        this.#elements = {
+            timer: document.getElementById('timer'),
+            startBtn: document.getElementById('startBtn'),
+            stopBtn: document.getElementById('stopBtn'),
+            status: document.getElementById('status'),
+        };
+
+        this.#elements.startBtn.addEventListener('click', () => this.start());
+        this.#elements.stopBtn.addEventListener('click', () => this.stop());
+    }
+
+    // Public API
+
+    async start() {
+        this.#resetAudio();
+        await this.#setupAudioSession();
+        this.#updateMediaSession();
+        this.#playBell();
+        this.#startSilentAudio();
+
+        this.#timeRemaining = MeditationTimer.DURATION;
+        this.#updateDisplay('Timer running...');
+        this.#setButtonState(true);
+        this.#updateMediaSessionPosition();
+
+        this.#intervalId = setInterval(() => this.#tick(), 1000);
+    }
+
+    stop() {
+        clearInterval(this.#intervalId);
+        this.#stopSilentAudio();
+        this.#setMediaSessionPlaying(false);
+
+        this.#timeRemaining = MeditationTimer.DURATION;
+        this.#updateDisplay('Stopped');
+        this.#setButtonState(false);
+        this.#updateMediaSessionPosition();
+    }
+
+    // Audio
+
+    #initAudioContext() {
+        if (!this.#audioContext) {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            this.#audioContext = new AudioContext({ latencyHint: 'playback' });
+        }
+        if (this.#audioContext.state === 'suspended') {
+            this.#audioContext.resume();
+        }
+    }
+
+    #startSilentAudio() {
+        this.#initAudioContext();
+
+        this.#oscillator = this.#audioContext.createOscillator();
+        this.#gain = this.#audioContext.createGain();
+
+        this.#oscillator.connect(this.#gain);
+        this.#gain.connect(this.#audioContext.destination);
+
+        this.#gain.gain.setValueAtTime(0.001, this.#audioContext.currentTime);
+        this.#oscillator.frequency.value = 5;
+        this.#oscillator.start();
+    }
+
+    #stopSilentAudio() {
+        if (this.#oscillator) {
+            this.#oscillator.stop();
+            this.#oscillator = null;
+            this.#gain = null;
+        }
+    }
+
+    #playBell() {
+        this.#initAudioContext();
+
+        const now = this.#audioContext.currentTime;
+        const duration = 2;
+        const frequencies = [440, 660, 880];
+
+        frequencies.forEach((freq, i) => {
+            const osc = this.#audioContext.createOscillator();
+            const gain = this.#audioContext.createGain();
+
+            osc.frequency.value = freq;
+            osc.connect(gain);
+            gain.connect(this.#audioContext.destination);
+
+            gain.gain.setValueAtTime(0.3 / (i + 1), now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + duration);
+
+            osc.start(now);
+            osc.stop(now + duration);
+        });
+    }
+
+    #resetAudio() {
+        clearInterval(this.#intervalId);
+        this.#stopSilentAudio();
+        this.#setMediaSessionPlaying(false);
+
+        if (this.#audioContext) {
+            this.#audioContext.close();
+            this.#audioContext = null;
+        }
+        this.#initAudioContext();
+    }
+
+    // Media Session
+
+    async #setupAudioSession() {
         if ('audioSession' in navigator) {
             try {
                 navigator.audioSession.type = 'playback';
-                console.log('Audio Session API initialized');
             } catch (err) {
                 console.log('Audio Session API setup failed:', err);
             }
         }
     }
 
-    function initAudioContext() {
-        if (!audioContext) {
-            audioContext = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'playback'});
-        }
+    #updateMediaSession() {
+        if (!('mediaSession' in navigator)) return;
 
-        if (audioContext.state === 'suspended') {
-            audioContext.resume();
-        }
-    }
-
-    function updateMediaSession() {
-        if ('mediaSession' in navigator) {
-            navigator.mediaSession.metadata = new MediaMetadata({
-                title: 'Meditation Timer',
-                artist: 'Ripple',
-                artwork: [
-                    {
-                        src: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><circle cx="48" cy="48" r="45" fill="%23667eea"/></svg>',
-                        sizes: '96x96',
-                        type: 'image/svg+xml'
-                    }
-                ]
-            });
-
-            navigator.mediaSession.playbackState = 'playing';
-
-            navigator.mediaSession.setActionHandler('pause', () => {
-                stopTimer();
-            });
-
-            navigator.mediaSession.setActionHandler('play', () => {
-                startTimer();
-            });
-        }
-    }
-
-    function updateMediaSessionPosition() {
-        if ('mediaSession' in navigator && navigator.mediaSession.setPositionState) {
-            try {
-                navigator.mediaSession.setPositionState({
-                    duration: TIMER_DURATION,
-                    playbackRate: 1,
-                    position: TIMER_DURATION - timeRemaining
-                });
-            } catch (err) {
-                console.log('setPositionState not supported:', err);
-            }
-        }
-    }
-
-    function startSilentAudio() {
-        initAudioContext();
-
-        // Create an inaudible oscillator to keep the audio session active
-        oscillator = audioContext.createOscillator();
-        gain = audioContext.createGain();
-
-        oscillator.connect(gain);
-        gain.connect(audioContext.destination);
-
-        // Set gain to very low value - imperceptible but keeps audio session alive
-        gain.gain.setValueAtTime(0.001, audioContext.currentTime);
-
-        // Use subsonic frequency inaudible to human ears
-        oscillator.frequency.value = 5;
-        oscillator.start();
-    }
-
-    function stopSilentAudio() {
-        if (oscillator) {
-            oscillator.stop();
-            oscillator = null;
-            gain = null;
-        }
-    }
-
-    function playBell() {
-        initAudioContext();
-        const now = audioContext.currentTime;
-        const bellDuration = 2;
-
-        // Create multiple oscillators for a rich bell sound
-        const frequencies = [440, 660, 880]; // A4, E5, A5
-        const oscillators = [];
-        const gains = [];
-
-        frequencies.forEach((freq, index) => {
-            const osc = audioContext.createOscillator();
-            const g = audioContext.createGain();
-
-            osc.frequency.value = freq;
-            osc.connect(g);
-            g.connect(audioContext.destination);
-
-            // Decay envelope - starts loud and fades out
-            g.gain.setValueAtTime(0.3 / (index + 1), now);
-            g.gain.exponentialRampToValueAtTime(0.01, now + bellDuration);
-
-            osc.start(now);
-            osc.stop(now + bellDuration);
-
-            oscillators.push(osc);
-            gains.push(g);
+        navigator.mediaSession.metadata = new MediaMetadata({
+            title: 'Meditation Timer',
+            artist: 'Ripple',
+            artwork: [{
+                src: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><circle cx="48" cy="48" r="45" fill="%23667eea"/></svg>',
+                sizes: '96x96',
+                type: 'image/svg+xml',
+            }],
         });
+
+        this.#setMediaSessionPlaying(true);
+        navigator.mediaSession.setActionHandler('pause', () => this.stop());
+        navigator.mediaSession.setActionHandler('play', () => this.start());
     }
 
-    function resetAudioState() {
-        // Clear any existing timer
-        if (timerInterval) {
-            clearInterval(timerInterval);
+    #updateMediaSessionPosition() {
+        if (!('mediaSession' in navigator) || !navigator.mediaSession.setPositionState) return;
+
+        try {
+            navigator.mediaSession.setPositionState({
+                duration: MeditationTimer.DURATION,
+                playbackRate: 1,
+                position: MeditationTimer.DURATION - this.#timeRemaining,
+            });
+        } catch (err) {
+            console.log('setPositionState not supported:', err);
         }
-        // Stop any existing audio
-        stopSilentAudio();
-        // Reset media session
+    }
+
+    #setMediaSessionPlaying(playing) {
         if ('mediaSession' in navigator) {
-            navigator.mediaSession.playbackState = 'paused';
+            navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
         }
-        if (audioContext) {
-            audioContext.close();
+    }
+
+    // Timer
+
+    #tick() {
+        this.#timeRemaining--;
+        this.#updateDisplay('Timer running...');
+        this.#updateMediaSessionPosition();
+
+        if (this.#timeRemaining <= 0) {
+            this.#complete();
         }
-        initAudioContext();
     }
 
-    async function startTimer() {
-        resetAudioState();
-        initAudioContext();
-        await setupAudioSession();
-        updateMediaSession();
-        updateMediaSessionPosition();
-        playBell();
-        startSilentAudio();
+    #complete() {
+        clearInterval(this.#intervalId);
+        this.#stopSilentAudio();
+        this.#playBell();
+        this.#setMediaSessionPlaying(false);
 
-        timeRemaining = TIMER_DURATION;
-        timerDisplay.textContent = timeRemaining;
-        statusDisplay.textContent = 'Timer running...';
-        startBtn.disabled = true;
-        stopBtn.disabled = false;
-
-        timerInterval = setInterval(() => {
-            timeRemaining--;
-            timerDisplay.textContent = timeRemaining;
-            updateMediaSessionPosition();
-
-            if (timeRemaining <= 0) {
-                clearInterval(timerInterval);
-                stopSilentAudio();
-                playBell();
-                if ('mediaSession' in navigator) {
-                    navigator.mediaSession.playbackState = 'paused';
-                }
-                updateMediaSessionPosition();
-                statusDisplay.textContent = 'Time up!';
-                startBtn.disabled = false;
-                stopBtn.disabled = true;
-                timerDisplay.textContent = '0';
-            }
-        }, 1000);
+        this.#elements.timer.textContent = '0';
+        this.#elements.status.textContent = 'Time up!';
+        this.#setButtonState(false);
+        this.#updateMediaSessionPosition();
     }
 
-    function stopTimer() {
-        clearInterval(timerInterval);
-        stopSilentAudio();
-        if ('mediaSession' in navigator) {
-            navigator.mediaSession.playbackState = 'paused';
-        }
-        timeRemaining = TIMER_DURATION;
-        timerDisplay.textContent = timeRemaining;
-        updateMediaSessionPosition();
-        statusDisplay.textContent = 'Stopped';
-        startBtn.disabled = false;
-        stopBtn.disabled = true;
+    // UI
+
+    #updateDisplay(status) {
+        this.#elements.timer.textContent = this.#timeRemaining;
+        this.#elements.status.textContent = status;
     }
 
-    startBtn.addEventListener('click', () => startTimer().catch(console.error));
-    stopBtn.addEventListener('click', stopTimer);
-
-    // Register service worker
-    if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('sw.js').catch(() => {
-            // Service worker registration failed, but app will still work
-        });
+    #setButtonState(running) {
+        this.#elements.startBtn.disabled = running;
+        this.#elements.stopBtn.disabled = !running;
     }
+}
+
+new MeditationTimer();
+
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+}
 </script>
 </body>
 </html>
