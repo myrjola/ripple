@@ -92,17 +92,18 @@
     function startSilentAudio() {
         initAudioContext();
 
-        // Create a silent oscillator to keep the app awake
+        // Create an inaudible oscillator to keep the audio session active
         oscillator = audioContext.createOscillator();
         gain = audioContext.createGain();
 
         oscillator.connect(gain);
         gain.connect(audioContext.destination);
 
-        // Set gain to 0 so it's silent
-        gain.gain.setValueAtTime(0, audioContext.currentTime);
+        // Set gain to very low value - imperceptible but keeps audio session alive
+        gain.gain.setValueAtTime(0.1, audioContext.currentTime);
 
-        oscillator.frequency.value = 20;
+        // Use subsonic frequency inaudible to human ears
+        oscillator.frequency.value = 255;
         oscillator.start();
     }
 
