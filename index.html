@@ -55,7 +55,7 @@
 
     function initAudioContext() {
         if (!audioContext) {
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            audioContext = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'playback'});
         }
 
         if (audioContext.state === 'suspended') {
