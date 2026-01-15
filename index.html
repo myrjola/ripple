@@ -1,11 +1,132 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Ripple timer</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meditation Timer</title>
 </head>
 <body>
-<h1>Ripple</h1>
+    <h1>Meditation Timer</h1>
+    <div id="timer">10</div>
+    <button id="startBtn">Start 10s Timer</button>
+    <button id="stopBtn" disabled>Stop</button>
+    <p id="status">Ready</p>
+
+    <script>
+        let audioContext;
+        let oscillator;
+        let gain;
+        let timerInterval;
+        let timeRemaining = 10;
+        const timerDisplay = document.getElementById('timer');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const statusDisplay = document.getElementById('status');
+
+        function initAudioContext() {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+
+            if (audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+        }
+
+        function startSilentAudio() {
+            initAudioContext();
+
+            // Create a silent oscillator to keep the app awake
+            oscillator = audioContext.createOscillator();
+            gain = audioContext.createGain();
+
+            oscillator.connect(gain);
+            gain.connect(audioContext.destination);
+
+            // Set gain to 0 so it's silent
+            gain.gain.setValueAtTime(0, audioContext.currentTime);
+
+            oscillator.frequency.value = 20;
+            oscillator.start();
+        }
+
+        function stopSilentAudio() {
+            if (oscillator) {
+                oscillator.stop();
+                oscillator = null;
+                gain = null;
+            }
+        }
+
+        function playBell() {
+            initAudioContext();
+            const now = audioContext.currentTime;
+            const bellDuration = 2;
+
+            // Create multiple oscillators for a rich bell sound
+            const frequencies = [440, 660, 880]; // A4, E5, A5
+            const oscillators = [];
+            const gains = [];
+
+            frequencies.forEach((freq, index) => {
+                const osc = audioContext.createOscillator();
+                const g = audioContext.createGain();
+
+                osc.frequency.value = freq;
+                osc.connect(g);
+                g.connect(audioContext.destination);
+
+                // Decay envelope - starts loud and fades out
+                g.gain.setValueAtTime(0.3 / (index + 1), now);
+                g.gain.exponentialRampToValueAtTime(0.01, now + bellDuration);
+
+                osc.start(now);
+                osc.stop(now + bellDuration);
+
+                oscillators.push(osc);
+                gains.push(g);
+            });
+        }
+
+        function startTimer() {
+            initAudioContext();
+            playBell();
+            startSilentAudio();
+
+            timeRemaining = 10;
+            timerDisplay.textContent = timeRemaining;
+            statusDisplay.textContent = 'Timer running...';
+            startBtn.disabled = true;
+            stopBtn.disabled = false;
+
+            timerInterval = setInterval(() => {
+                timeRemaining--;
+                timerDisplay.textContent = timeRemaining;
+
+                if (timeRemaining <= 0) {
+                    clearInterval(timerInterval);
+                    stopSilentAudio();
+                    playBell();
+                    statusDisplay.textContent = 'Time up!';
+                    startBtn.disabled = false;
+                    stopBtn.disabled = true;
+                    timerDisplay.textContent = '0';
+                }
+            }, 1000);
+        }
+
+        function stopTimer() {
+            clearInterval(timerInterval);
+            stopSilentAudio();
+            timeRemaining = 10;
+            timerDisplay.textContent = timeRemaining;
+            statusDisplay.textContent = 'Stopped';
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+        }
+
+        startBtn.addEventListener('click', startTimer);
+        stopBtn.addEventListener('click', stopTimer);
+    </script>
 </body>
 </html>
