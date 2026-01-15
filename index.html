@@ -89,6 +89,20 @@
         }
     }
 
+    function updateMediaSessionPosition() {
+        if ('mediaSession' in navigator && navigator.mediaSession.setPositionState) {
+            try {
+                navigator.mediaSession.setPositionState({
+                    duration: 10,
+                    playbackRate: 1,
+                    position: 10 - timeRemaining
+                });
+            } catch (err) {
+                console.log('setPositionState not supported:', err);
+            }
+        }
+    }
+
     function startSilentAudio() {
         initAudioContext();
 
@@ -149,6 +163,7 @@
         initAudioContext();
         await setupAudioSession();
         updateMediaSession();
+        updateMediaSessionPosition();
         playBell();
         startSilentAudio();
 
@@ -161,6 +176,7 @@
         timerInterval = setInterval(() => {
             timeRemaining--;
             timerDisplay.textContent = timeRemaining;
+            updateMediaSessionPosition();
 
             if (timeRemaining <= 0) {
                 clearInterval(timerInterval);
@@ -169,6 +185,7 @@
                 if ('mediaSession' in navigator) {
                     navigator.mediaSession.playbackState = 'paused';
                 }
+                updateMediaSessionPosition();
                 statusDisplay.textContent = 'Time up!';
                 startBtn.disabled = false;
                 stopBtn.disabled = true;
@@ -185,6 +202,7 @@
         }
         timeRemaining = 10;
         timerDisplay.textContent = timeRemaining;
+        updateMediaSessionPosition();
         statusDisplay.textContent = 'Stopped';
         startBtn.disabled = false;
         stopBtn.disabled = true;
