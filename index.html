@@ -21,11 +21,12 @@
 <p id="status">Ready</p>
 
 <script>
+    const TIMER_DURATION = 10;
     let audioContext;
     let oscillator;
     let gain;
     let timerInterval;
-    let timeRemaining = 10;
+    let timeRemaining = TIMER_DURATION;
     const timerDisplay = document.getElementById('timer');
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
@@ -93,9 +94,9 @@
         if ('mediaSession' in navigator && navigator.mediaSession.setPositionState) {
             try {
                 navigator.mediaSession.setPositionState({
-                    duration: 10,
+                    duration: TIMER_DURATION,
                     playbackRate: 1,
-                    position: 10 - timeRemaining
+                    position: TIMER_DURATION - timeRemaining
                 });
             } catch (err) {
                 console.log('setPositionState not supported:', err);
@@ -114,10 +115,10 @@
         gain.connect(audioContext.destination);
 
         // Set gain to very low value - imperceptible but keeps audio session alive
-        gain.gain.setValueAtTime(0.1, audioContext.currentTime);
+        gain.gain.setValueAtTime(0.001, audioContext.currentTime);
 
         // Use subsonic frequency inaudible to human ears
-        oscillator.frequency.value = 255;
+        oscillator.frequency.value = 5;
         oscillator.start();
     }
 
@@ -167,7 +168,7 @@
         playBell();
         startSilentAudio();
 
-        timeRemaining = 10;
+        timeRemaining = TIMER_DURATION;
         timerDisplay.textContent = timeRemaining;
         statusDisplay.textContent = 'Timer running...';
         startBtn.disabled = true;
@@ -200,7 +201,7 @@
         if ('mediaSession' in navigator) {
             navigator.mediaSession.playbackState = 'paused';
         }
-        timeRemaining = 10;
+        timeRemaining = TIMER_DURATION;
         timerDisplay.textContent = timeRemaining;
         updateMediaSessionPosition();
         statusDisplay.textContent = 'Stopped';
