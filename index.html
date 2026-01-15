@@ -35,18 +35,7 @@
     async function setupAudioSession() {
         if ('audioSession' in navigator) {
             try {
-                // Configure audio session for playback
-                await navigator.audioSession.addEventListener?.('statechange', (event) => {
-                    console.log('Audio session state changed:', event.state);
-                });
-
-                // Set audio session category to playback to allow background audio
-                if (navigator.audioSession.setCategory) {
-                    navigator.audioSession.setCategory('playback');
-                }
-
                 navigator.audioSession.type = 'playback';
-
                 console.log('Audio Session API initialized');
             } catch (err) {
                 console.log('Audio Session API setup failed:', err);
@@ -160,7 +149,25 @@
         });
     }
 
+    function resetAudioState() {
+        // Clear any existing timer
+        if (timerInterval) {
+            clearInterval(timerInterval);
+        }
+        // Stop any existing audio
+        stopSilentAudio();
+        // Reset media session
+        if ('mediaSession' in navigator) {
+            navigator.mediaSession.playbackState = 'paused';
+        }
+        if (audioContext) {
+            audioContext.close();
+        }
+        initAudioContext();
+    }
+
     async function startTimer() {
+        resetAudioState();
         initAudioContext();
         await setupAudioSession();
         updateMediaSession();
