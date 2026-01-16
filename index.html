@@ -141,23 +141,69 @@ class MeditationTimer {
         this.#initAudioContext();
 
         const now = this.#audioContext.currentTime;
-        const duration = 2;
-        const frequencies = [440, 660, 880];
+        const ctx = this.#audioContext;
 
-        frequencies.forEach((freq, i) => {
-            const osc = this.#audioContext.createOscillator();
-            const gain = this.#audioContext.createGain();
+        // Tibetan singing bowl partials - inharmonic frequencies with relative amplitudes and decay times
+        const fundamental = 220;
+        const partials = [
+            { ratio: 1.0,   amp: 0.4,  decay: 6.0 },  // fundamental
+            { ratio: 2.71,  amp: 0.25, decay: 4.5 },  // characteristic singing bowl partial
+            { ratio: 5.15,  amp: 0.15, decay: 3.5 },  // higher partial
+            { ratio: 8.43,  amp: 0.08, decay: 2.5 },  // shimmer
+            { ratio: 12.7,  amp: 0.04, decay: 1.8 },  // brightness
+        ];
 
-            osc.frequency.value = freq;
+        // Create each partial with its own oscillator and envelope
+        partials.forEach(({ ratio, amp, decay }) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(fundamental * ratio, now);
+
+            // Slight detuning for natural beating effect
+            const detune = (Math.random() - 0.5) * 4;
+            osc.detune.setValueAtTime(detune, now);
+
             osc.connect(gain);
-            gain.connect(this.#audioContext.destination);
+            gain.connect(ctx.destination);
 
-            gain.gain.setValueAtTime(0.3 / (i + 1), now);
-            gain.gain.exponentialRampToValueAtTime(0.01, now + duration);
+            // Bell envelope: quick attack, long exponential decay
+            gain.gain.setValueAtTime(0, now);
+            gain.gain.linearRampToValueAtTime(amp, now + 0.003);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + decay);
 
             osc.start(now);
-            osc.stop(now + duration);
+            osc.stop(now + decay + 0.1);
         });
+
+        // Strike transient - short burst of filtered noise
+        const strikeLength = 0.08;
+        const bufferSize = ctx.sampleRate * strikeLength;
+        const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const data = noiseBuffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+            data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.1));
+        }
+
+        const noise = ctx.createBufferSource();
+        noise.buffer = noiseBuffer;
+
+        const strikeFilter = ctx.createBiquadFilter();
+        strikeFilter.type = 'bandpass';
+        strikeFilter.frequency.value = fundamental * 2;
+        strikeFilter.Q.value = 2;
+
+        const strikeGain = ctx.createGain();
+        strikeGain.gain.setValueAtTime(0.3, now);
+        strikeGain.gain.exponentialRampToValueAtTime(0.001, now + strikeLength);
+
+        noise.connect(strikeFilter);
+        strikeFilter.connect(strikeGain);
+        strikeGain.connect(ctx.destination);
+
+        noise.start(now);
+        noise.stop(now + strikeLength);
     }
 
     #resetAudio() {
