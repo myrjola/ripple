@@ -30,362 +30,365 @@
 </div>
 
 <script>
-class MeditationTimer {
-    static DURATION = 10;
+    class MeditationTimer {
+        static DURATION = 10;
 
-    #audioContext = null;
-    #oscillator = null;
-    #gain = null;
-    #intervalId = null;
-    #countdownId = null;
-    #activeNodes = [];
-    #bellTimeouts = [];
-    #delayStartTime = null;
-    #timeRemaining = MeditationTimer.DURATION;
-    #selectedDuration = 10;
+        #audioContext = null;
+        #oscillator = null;
+        #gain = null;
+        #intervalId = null;
+        #countdownId = null;
+        #activeNodes = [];
+        #bellTimeouts = [];
+        #delayStartTime = null;
+        #timeRemaining = MeditationTimer.DURATION;
+        #selectedDuration = 10;
 
-    #elements;
+        #elements;
 
-    constructor() {
-        this.#elements = {
-            timer: document.getElementById('timer'),
-            startBtn: document.getElementById('startBtn'),
-            stopBtn: document.getElementById('stopBtn'),
-            status: document.getElementById('status'),
-            countdown: document.getElementById('countdown'),
-        };
+        constructor() {
+            this.#elements = {
+                timer: document.getElementById('timer'),
+                startBtn: document.getElementById('startBtn'),
+                stopBtn: document.getElementById('stopBtn'),
+                status: document.getElementById('status'),
+                countdown: document.getElementById('countdown'),
+            };
 
-        this.#elements.startBtn.addEventListener('click', () => this.start());
-        this.#elements.stopBtn.addEventListener('click', () => this.stop());
+            this.#elements.startBtn.addEventListener('click', () => this.start());
+            this.#elements.stopBtn.addEventListener('click', () => this.stop());
 
-        document.querySelectorAll('.preset-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => this.#selectDuration(e.target));
-        });
+            document.querySelectorAll('.preset-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => this.#selectDuration(e.target));
+            });
 
-        this.#updateTimerDisplay();
-    }
+            this.#updateTimerDisplay();
+        }
 
-    #selectDuration(button) {
-        document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
-        button.classList.add('active');
-        this.#selectedDuration = parseInt(button.dataset.duration);
-        this.#timeRemaining = this.#selectedDuration;
-        this.#updateTimerDisplay();
-    }
+        #selectDuration(button) {
+            document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
+            button.classList.add('active');
+            this.#selectedDuration = parseInt(button.dataset.duration);
+            this.#timeRemaining = this.#selectedDuration;
+            this.#updateTimerDisplay();
+        }
 
-    #updateTimerDisplay() {
-        const minutes = Math.floor(this.#timeRemaining / 60);
-        const seconds = this.#timeRemaining % 60;
-        this.#elements.timer.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-    }
+        #updateTimerDisplay() {
+            const minutes = Math.floor(this.#timeRemaining / 60);
+            const seconds = this.#timeRemaining % 60;
+            this.#elements.timer.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }
 
-    // Public API
+        // Public API
 
-    async start() {
-        this.#resetAudio();
-        this.#setupAudioSession();
-        this.#updateMediaSession();
-        this.#startSilentAudio();
+        async start() {
+            this.#resetAudio();
+            this.#setupAudioSession();
+            this.#updateMediaSession();
+            this.#startSilentAudio();
 
-        this.#timeRemaining = this.#selectedDuration;
-        this.#updateTimerDisplay();
-        this.#elements.status.textContent = 'Get ready';
-        this.#setButtonState(true);
-        this.#updateMediaSessionPosition();
-
-        // Show countdown
-        let countdownSeconds = 5;
-        this.#elements.timer.style.display = 'none';
-        this.#elements.countdown.textContent = countdownSeconds;
-        this.#delayStartTime = Date.now();
-
-        this.#countdownId = setInterval(() => {
-            countdownSeconds--;
-            if (countdownSeconds > 0) {
-                this.#elements.countdown.textContent = countdownSeconds;
-            } else {
-                clearInterval(this.#countdownId);
-                this.#elements.timer.style.display = 'block';
-                this.#elements.countdown.textContent = '';
-                this.#delayStartTime = null;
-                this.#playBell();
-                this.#elements.status.textContent = 'Timer running...';
-                this.#intervalId = setInterval(() => this.#tick(), 1000);
-            }
+            this.#timeRemaining = this.#selectedDuration;
+            this.#updateTimerDisplay();
+            this.#elements.status.textContent = 'Get ready';
+            this.#setButtonState(true);
             this.#updateMediaSessionPosition();
-        }, 1000);
-    }
 
-    stop() {
-        clearInterval(this.#intervalId);
-        clearInterval(this.#countdownId);
-        this.#stopAllBells();
-        this.#stopSilentAudio();
-        this.#setMediaSessionPlaying(false);
+            // Show countdown
+            let countdownSeconds = 5;
+            this.#elements.timer.style.display = 'none';
+            this.#elements.countdown.textContent = countdownSeconds;
+            this.#delayStartTime = Date.now();
 
-        this.#delayStartTime = null;
-        this.#elements.timer.style.display = 'block';
-        this.#elements.countdown.textContent = '';
-        this.#timeRemaining = this.#selectedDuration;
-        this.#updateTimerDisplay();
-        this.#elements.status.textContent = 'Stopped';
-        this.#setButtonState(false);
-        this.#updateMediaSessionPosition();
-    }
-
-    // Audio
-
-    #initAudioContext() {
-        if (!this.#audioContext) {
-            const AudioContext = window.AudioContext || window.webkitAudioContext;
-            this.#audioContext = new AudioContext({ latencyHint: 'playback' });
+            this.#countdownId = setInterval(() => {
+                countdownSeconds--;
+                if (countdownSeconds > 0) {
+                    this.#elements.countdown.textContent = countdownSeconds;
+                } else {
+                    clearInterval(this.#countdownId);
+                    this.#elements.timer.style.display = 'block';
+                    this.#elements.countdown.textContent = '';
+                    this.#delayStartTime = null;
+                    this.#playBell();
+                    this.#elements.status.textContent = 'Timer running...';
+                    this.#intervalId = setInterval(() => this.#tick(), 1000);
+                }
+                this.#updateMediaSessionPosition();
+            }, 1000);
         }
-        if (this.#audioContext.state === 'suspended') {
-            this.#audioContext.resume();
+
+        stop() {
+            console.log('stop')
+            clearInterval(this.#intervalId);
+            clearInterval(this.#countdownId);
+            this.#stopAllBells();
+            this.#stopSilentAudio();
+            this.#setMediaSessionPlaying(false);
+
+            this.#delayStartTime = null;
+            this.#elements.timer.style.display = 'block';
+            this.#elements.countdown.textContent = '';
+            this.#timeRemaining = this.#selectedDuration;
+            this.#updateTimerDisplay();
+            this.#elements.status.textContent = 'Stopped';
+            this.#setButtonState(false);
+            this.#updateMediaSessionPosition();
         }
-    }
 
-    #startSilentAudio() {
-        this.#initAudioContext();
+        // Audio
 
-        this.#oscillator = this.#audioContext.createOscillator();
-        this.#gain = this.#audioContext.createGain();
-
-        this.#oscillator.connect(this.#gain);
-        this.#gain.connect(this.#audioContext.destination);
-
-        this.#gain.gain.setValueAtTime(0.001, this.#audioContext.currentTime);
-        this.#oscillator.frequency.value = 5;
-        this.#oscillator.start();
-    }
-
-    #stopSilentAudio() {
-        if (this.#oscillator) {
-            this.#oscillator.stop();
-            this.#oscillator = null;
-            this.#gain = null;
+        #initAudioContext() {
+            if (!this.#audioContext) {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                this.#audioContext = new AudioContext({latencyHint: 'playback'});
+            }
+            if (this.#audioContext.state === 'suspended') {
+                this.#audioContext.resume();
+            }
         }
-    }
 
-    #playBell() {
-        this.#initAudioContext();
+        #startSilentAudio() {
+            this.#initAudioContext();
 
-        const now = this.#audioContext.currentTime;
-        const ctx = this.#audioContext;
+            this.#oscillator = this.#audioContext.createOscillator();
+            this.#gain = this.#audioContext.createGain();
 
-        // Tibetan singing bowl partials - inharmonic frequencies with relative amplitudes and decay times
-        const fundamental = 220;
-        const partials = [
-            { ratio: 1.0,   amp: 0.4,  decay: 6.0 },  // fundamental
-            { ratio: 2.71,  amp: 0.25, decay: 4.5 },  // characteristic singing bowl partial
-            { ratio: 5.15,  amp: 0.15, decay: 3.5 },  // higher partial
-            { ratio: 8.43,  amp: 0.08, decay: 2.5 },  // shimmer
-            { ratio: 12.7,  amp: 0.04, decay: 1.8 },  // brightness
-        ];
+            this.#oscillator.connect(this.#gain);
+            this.#gain.connect(this.#audioContext.destination);
 
-        // Create each partial with its own oscillator and envelope
-        partials.forEach(({ ratio, amp, decay }) => {
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
+            this.#gain.gain.setValueAtTime(0.001, this.#audioContext.currentTime);
+            this.#oscillator.frequency.value = 5;
+            this.#oscillator.start();
+        }
 
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(fundamental * ratio, now);
+        #stopSilentAudio() {
+            if (this.#oscillator) {
+                this.#oscillator.stop();
+                this.#oscillator = null;
+                this.#gain = null;
+            }
+        }
 
-            // Slight detuning for natural beating effect
-            const detune = (Math.random() - 0.5) * 4;
-            osc.detune.setValueAtTime(detune, now);
+        #playBell() {
+            this.#initAudioContext();
 
-            osc.connect(gain);
-            gain.connect(ctx.destination);
+            const now = this.#audioContext.currentTime;
+            const ctx = this.#audioContext;
 
-            // Bell envelope: quick attack, long exponential decay
-            gain.gain.setValueAtTime(0, now);
-            gain.gain.linearRampToValueAtTime(amp, now + 0.003);
-            gain.gain.exponentialRampToValueAtTime(0.001, now + decay);
+            // Tibetan singing bowl partials - inharmonic frequencies with relative amplitudes and decay times
+            const fundamental = 220;
+            const partials = [
+                {ratio: 1.0, amp: 0.4, decay: 6.0},  // fundamental
+                {ratio: 2.71, amp: 0.25, decay: 4.5},  // characteristic singing bowl partial
+                {ratio: 5.15, amp: 0.15, decay: 3.5},  // higher partial
+                {ratio: 8.43, amp: 0.08, decay: 2.5},  // shimmer
+                {ratio: 12.7, amp: 0.04, decay: 1.8},  // brightness
+            ];
 
-            // Track node for cleanup
-            this.#activeNodes.push(osc);
-            osc.onended = () => {
-                const idx = this.#activeNodes.indexOf(osc);
+            // Create each partial with its own oscillator and envelope
+            partials.forEach(({ratio, amp, decay}) => {
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(fundamental * ratio, now);
+
+                // Slight detuning for natural beating effect
+                const detune = (Math.random() - 0.5) * 4;
+                osc.detune.setValueAtTime(detune, now);
+
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+
+                // Bell envelope: quick attack, long exponential decay
+                gain.gain.setValueAtTime(0, now);
+                gain.gain.linearRampToValueAtTime(amp, now + 0.003);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + decay);
+
+                // Track node for cleanup
+                this.#activeNodes.push(osc);
+                osc.onended = () => {
+                    const idx = this.#activeNodes.indexOf(osc);
+                    if (idx > -1) this.#activeNodes.splice(idx, 1);
+                };
+
+                osc.start(now);
+                osc.stop(now + decay + 0.1);
+            });
+
+            // Strike transient - short burst of filtered noise
+            const strikeLength = 0.08;
+            const bufferSize = ctx.sampleRate * strikeLength;
+            const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+            const data = noiseBuffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) {
+                data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.1));
+            }
+
+            const noise = ctx.createBufferSource();
+            noise.buffer = noiseBuffer;
+
+            const strikeFilter = ctx.createBiquadFilter();
+            strikeFilter.type = 'bandpass';
+            strikeFilter.frequency.value = fundamental * 2;
+            strikeFilter.Q.value = 2;
+
+            const strikeGain = ctx.createGain();
+            strikeGain.gain.setValueAtTime(0.3, now);
+            strikeGain.gain.exponentialRampToValueAtTime(0.001, now + strikeLength);
+
+            noise.connect(strikeFilter);
+            strikeFilter.connect(strikeGain);
+            strikeGain.connect(ctx.destination);
+
+            // Track noise node for cleanup
+            this.#activeNodes.push(noise);
+            noise.onended = () => {
+                const idx = this.#activeNodes.indexOf(noise);
                 if (idx > -1) this.#activeNodes.splice(idx, 1);
             };
 
-            osc.start(now);
-            osc.stop(now + decay + 0.1);
-        });
-
-        // Strike transient - short burst of filtered noise
-        const strikeLength = 0.08;
-        const bufferSize = ctx.sampleRate * strikeLength;
-        const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-        const data = noiseBuffer.getChannelData(0);
-        for (let i = 0; i < bufferSize; i++) {
-            data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.1));
+            noise.start(now);
+            noise.stop(now + strikeLength);
         }
 
-        const noise = ctx.createBufferSource();
-        noise.buffer = noiseBuffer;
-
-        const strikeFilter = ctx.createBiquadFilter();
-        strikeFilter.type = 'bandpass';
-        strikeFilter.frequency.value = fundamental * 2;
-        strikeFilter.Q.value = 2;
-
-        const strikeGain = ctx.createGain();
-        strikeGain.gain.setValueAtTime(0.3, now);
-        strikeGain.gain.exponentialRampToValueAtTime(0.001, now + strikeLength);
-
-        noise.connect(strikeFilter);
-        strikeFilter.connect(strikeGain);
-        strikeGain.connect(ctx.destination);
-
-        // Track noise node for cleanup
-        this.#activeNodes.push(noise);
-        noise.onended = () => {
-            const idx = this.#activeNodes.indexOf(noise);
-            if (idx > -1) this.#activeNodes.splice(idx, 1);
-        };
-
-        noise.start(now);
-        noise.stop(now + strikeLength);
-    }
-
-    #stopAllBells() {
-        // Stop all active audio nodes
-        this.#activeNodes.forEach(node => {
-            try {
-                node.stop();
-                node.disconnect();
-            } catch (e) {
-                // Node may already be stopped
-            }
-        });
-        this.#activeNodes = [];
-
-        // Clear all scheduled bell timeouts
-        this.#bellTimeouts.forEach(id => clearTimeout(id));
-        this.#bellTimeouts = [];
-    }
-
-    #resetAudio() {
-        clearInterval(this.#intervalId);
-        this.#stopAllBells();
-        this.#stopSilentAudio();
-        this.#setMediaSessionPlaying(false);
-        this.#delayStartTime = null;
-
-        if (this.#audioContext) {
-            this.#audioContext.close();
-            this.#audioContext = null;
-        }
-        this.#initAudioContext();
-    }
-
-    // Media Session
-
-    #setupAudioSession() {
-        if ('audioSession' in navigator) {
-            try {
-                navigator.audioSession.type = 'playback';
-            } catch (err) {
-                console.log('Audio Session API setup failed:', err);
-            }
-        }
-    }
-
-    #updateMediaSession() {
-        if (!('mediaSession' in navigator)) return;
-
-        navigator.mediaSession.metadata = new MediaMetadata({
-            title: 'Meditation Timer',
-            artist: 'Ripple',
-            artwork: [{
-                src: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><circle cx="48" cy="48" r="45" fill="%23667eea"/></svg>',
-                sizes: '96x96',
-                type: 'image/svg+xml',
-            }],
-        });
-
-        this.#setMediaSessionPlaying(true);
-        navigator.mediaSession.setActionHandler('play', null);
-        navigator.mediaSession.setActionHandler('pause', null);
-        navigator.mediaSession.setActionHandler('stop', this.stop);
-    }
-
-    #updateMediaSessionPosition() {
-        if (!('mediaSession' in navigator) || !navigator.mediaSession.setPositionState) return;
-
-        const DELAY = 5;
-        const totalDuration = this.#selectedDuration + DELAY;
-
-        let position;
-        if (this.#delayStartTime !== null) {
-            // During delay: position is elapsed time from start
-            position = Math.round((Date.now() - this.#delayStartTime) / 1000);
-        } else {
-            // During meditation: position is delay + elapsed meditation time
-            position = DELAY + (this.#selectedDuration - this.#timeRemaining);
-        }
-
-        try {
-            navigator.mediaSession.setPositionState({
-                duration: totalDuration,
-                playbackRate: 1,
-                position: position,
+        #stopAllBells() {
+            // Stop all active audio nodes
+            this.#activeNodes.forEach(node => {
+                try {
+                    node.stop();
+                    node.disconnect();
+                } catch (e) {
+                    // Node may already be stopped
+                }
             });
-        } catch (err) {
-            console.log('setPositionState not supported:', err);
+            this.#activeNodes = [];
+
+            // Clear all scheduled bell timeouts
+            this.#bellTimeouts.forEach(id => clearTimeout(id));
+            this.#bellTimeouts = [];
+        }
+
+        #resetAudio() {
+            clearInterval(this.#intervalId);
+            this.#stopAllBells();
+            this.#stopSilentAudio();
+            this.#setMediaSessionPlaying(false);
+            this.#delayStartTime = null;
+
+            if (this.#audioContext) {
+                this.#audioContext.close();
+                this.#audioContext = null;
+            }
+            this.#initAudioContext();
+        }
+
+        // Media Session
+
+        #setupAudioSession() {
+            if ('audioSession' in navigator) {
+                try {
+                    navigator.audioSession.type = 'playback';
+                } catch (err) {
+                    console.log('Audio Session API setup failed:', err);
+                }
+            }
+        }
+
+        #updateMediaSession() {
+            if (!('mediaSession' in navigator)) return;
+
+            navigator.mediaSession.metadata = new MediaMetadata({
+                title: 'Meditation Timer',
+                artist: 'Ripple',
+                artwork: [{
+                    src: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><circle cx="48" cy="48" r="45" fill="%23667eea"/></svg>',
+                    sizes: '96x96',
+                    type: 'image/svg+xml',
+                }],
+            });
+
+            this.#setMediaSessionPlaying(true);
+            navigator.mediaSession.setActionHandler('play', () => this.start());
+            navigator.mediaSession.setActionHandler('pause', () => this.stop());
+            navigator.mediaSession.setActionHandler('stop', () => this.stop());
+        }
+
+        #updateMediaSessionPosition() {
+            if (!('mediaSession' in navigator) || !navigator.mediaSession.setPositionState) return;
+
+            const DELAY = 5;
+            const BELL_SEQUENCE_DURATION = 27; // 21s for 4 bells + ~6s for final bell decay
+            const totalDuration = this.#selectedDuration + DELAY + BELL_SEQUENCE_DURATION;
+
+            let position;
+            if (this.#delayStartTime !== null) {
+                // During delay: position is elapsed time from start
+                position = Math.round((Date.now() - this.#delayStartTime) / 1000);
+            } else {
+                // During meditation: position is delay + elapsed meditation time
+                position = DELAY + (this.#selectedDuration - this.#timeRemaining);
+            }
+
+            try {
+                navigator.mediaSession.setPositionState({
+                    duration: totalDuration,
+                    playbackRate: 1,
+                    position: position,
+                });
+            } catch (err) {
+                console.log('setPositionState not supported:', err);
+            }
+        }
+
+        #setMediaSessionPlaying(playing) {
+            if ('mediaSession' in navigator) {
+                navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
+            }
+        }
+
+        // Timer
+
+        #tick() {
+            this.#timeRemaining--;
+            this.#updateTimerDisplay();
+            this.#updateMediaSessionPosition();
+
+            if (this.#timeRemaining <= 0) {
+                this.#complete();
+            }
+        }
+
+        #complete() {
+            clearInterval(this.#intervalId);
+            this.#stopSilentAudio();
+            this.#setMediaSessionPlaying(false);
+
+            this.#elements.timer.textContent = '0:00';
+            this.#elements.status.textContent = 'Time up!';
+            this.#setButtonState(false);
+            this.#updateMediaSessionPosition();
+
+            // Play bell four times to gently bring user back
+            this.#playBell();
+            this.#bellTimeouts.push(setTimeout(() => this.#playBell(), 7000));
+            this.#bellTimeouts.push(setTimeout(() => this.#playBell(), 14000));
+            this.#bellTimeouts.push(setTimeout(() => this.#playBell(), 21000));
+        }
+
+        // UI
+
+        #setButtonState(running) {
+            this.#elements.startBtn.disabled = running;
+            this.#elements.stopBtn.disabled = !running;
         }
     }
 
-    #setMediaSessionPlaying(playing) {
-        if ('mediaSession' in navigator) {
-            navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
-        }
+    new MeditationTimer();
+
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw.js').catch(() => {
+        });
     }
-
-    // Timer
-
-    #tick() {
-        this.#timeRemaining--;
-        this.#updateTimerDisplay();
-        this.#updateMediaSessionPosition();
-
-        if (this.#timeRemaining <= 0) {
-            this.#complete();
-        }
-    }
-
-    #complete() {
-        clearInterval(this.#intervalId);
-        this.#stopSilentAudio();
-        this.#setMediaSessionPlaying(false);
-
-        this.#elements.timer.textContent = '0:00';
-        this.#elements.status.textContent = 'Time up!';
-        this.#setButtonState(false);
-        this.#updateMediaSessionPosition();
-
-        // Play bell four times to gently bring user back
-        this.#playBell();
-        this.#bellTimeouts.push(setTimeout(() => this.#playBell(), 7000));
-        this.#bellTimeouts.push(setTimeout(() => this.#playBell(), 14000));
-        this.#bellTimeouts.push(setTimeout(() => this.#playBell(), 21000));
-    }
-
-    // UI
-
-    #setButtonState(running) {
-        this.#elements.startBtn.disabled = running;
-        this.#elements.stopBtn.disabled = !running;
-    }
-}
-
-new MeditationTimer();
-
-if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
-}
 </script>
 </body>
 </html>
