@@ -43,6 +43,7 @@
         #delayStartTime = null;
         #timeRemaining = MeditationTimer.DURATION;
         #selectedDuration = 10;
+        #wakeLock = null;
 
         #elements;
 
@@ -62,6 +63,13 @@
                 btn.addEventListener('click', (e) => this.#selectDuration(e.target));
             });
 
+            // Re-acquire wake lock when page becomes visible again
+            document.addEventListener('visibilitychange', async () => {
+                if (this.#wakeLock !== null && document.visibilityState === 'visible') {
+                    await this.#requestWakeLock();
+                }
+            });
+
             this.#updateTimerDisplay();
         }
 
@@ -79,6 +87,31 @@
             this.#elements.timer.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
         }
 
+        // Wake Lock
+
+        async #requestWakeLock() {
+            try {
+                if ('wakeLock' in navigator) {
+                    this.#wakeLock = await navigator.wakeLock.request('screen');
+                    console.log('Wake Lock acquired');
+                }
+            } catch (err) {
+                console.log('Wake Lock request failed:', err);
+            }
+        }
+
+        async #releaseWakeLock() {
+            if (this.#wakeLock !== null) {
+                try {
+                    await this.#wakeLock.release();
+                    console.log('Wake Lock released');
+                } catch (err) {
+                    console.log('Wake Lock release failed:', err);
+                }
+                this.#wakeLock = null;
+            }
+        }
+
         // Public API
 
         async start() {
@@ -86,6 +119,7 @@
             this.#setupAudioSession();
             this.#updateMediaSession();
             this.#startSilentAudio();
+            await this.#requestWakeLock();
 
             this.#timeRemaining = this.#selectedDuration;
             this.#updateTimerDisplay();
@@ -116,13 +150,14 @@
             }, 1000);
         }
 
-        stop() {
+        async stop() {
             console.log('stop')
             clearInterval(this.#intervalId);
             clearInterval(this.#countdownId);
             this.#stopAllBells();
             this.#stopSilentAudio();
             this.#setMediaSessionPlaying(false);
+            await this.#releaseWakeLock();
 
             this.#delayStartTime = null;
             this.#elements.timer.style.display = 'block';
@@ -359,7 +394,7 @@
             }
         }
 
-        #complete() {
+        async #complete() {
             clearInterval(this.#intervalId);
             this.#stopSilentAudio();
             this.#setMediaSessionPlaying(false);
