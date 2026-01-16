@@ -311,6 +311,7 @@
             navigator.mediaSession.setActionHandler('play', () => this.start());
             navigator.mediaSession.setActionHandler('pause', () => this.stop());
             navigator.mediaSession.setActionHandler('stop', () => this.stop());
+            navigator.mediaSession.setActionHandler('seekto', (i) => console.log('seekto', i));
         }
 
         #updateMediaSessionPosition() {
@@ -342,7 +343,7 @@
 
         #setMediaSessionPlaying(playing) {
             if ('mediaSession' in navigator) {
-                navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
+                navigator.mediaSession.playbackState = playing ? 'playing' : 'none';
             }
         }
 
@@ -373,6 +374,8 @@
             this.#bellTimeouts.push(setTimeout(() => this.#playBell(), 7000));
             this.#bellTimeouts.push(setTimeout(() => this.#playBell(), 14000));
             this.#bellTimeouts.push(setTimeout(() => this.#playBell(), 21000));
+            this.#bellTimeouts.push(setTimeout(() => this.stop(), 28000));
+
         }
 
         // UI
