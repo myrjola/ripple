@@ -44,6 +44,8 @@
         #timeRemaining = MeditationTimer.DURATION;
         #selectedDuration = 10;
         #wakeLock = null;
+        #meditationStartTime = null;
+        #completionTimeoutId = null;
 
         #elements;
 
@@ -63,10 +65,18 @@
                 btn.addEventListener('click', (e) => this.#selectDuration(e.target));
             });
 
-            // Re-acquire wake lock when page becomes visible again
+            // Re-acquire wake lock and update display when page becomes visible again
             document.addEventListener('visibilitychange', async () => {
-                if (this.#wakeLock !== null && document.visibilityState === 'visible') {
-                    await this.#requestWakeLock();
+                if (document.visibilityState === 'visible') {
+                    if (this.#wakeLock !== null) {
+                        await this.#requestWakeLock();
+                    }
+                    // Update display immediately when returning to foreground
+                    if (this.#delayStartTime !== null) {
+                        this.#tickCountdown();
+                    } else if (this.#meditationStartTime !== null) {
+                        this.#tick();
+                    }
                 }
             });
 
@@ -128,32 +138,19 @@
             this.#updateMediaSessionPosition();
 
             // Show countdown
-            let countdownSeconds = 5;
             this.#elements.timer.style.display = 'none';
-            this.#elements.countdown.textContent = countdownSeconds;
             this.#delayStartTime = Date.now();
-
-            this.#countdownId = setInterval(() => {
-                countdownSeconds--;
-                if (countdownSeconds > 0) {
-                    this.#elements.countdown.textContent = countdownSeconds;
-                } else {
-                    clearInterval(this.#countdownId);
-                    this.#elements.timer.style.display = 'block';
-                    this.#elements.countdown.textContent = '';
-                    this.#delayStartTime = null;
-                    this.#playBell();
-                    this.#elements.status.textContent = 'Timer running...';
-                    this.#intervalId = setInterval(() => this.#tick(), 1000);
-                }
-                this.#updateMediaSessionPosition();
-            }, 1000);
+            this.#elements.countdown.textContent = '5';
+            this.#countdownId = setInterval(() => this.#tickCountdown(), 100);
         }
 
         async stop() {
             console.log('stop')
             clearInterval(this.#intervalId);
             clearInterval(this.#countdownId);
+            clearTimeout(this.#completionTimeoutId);
+            this.#completionTimeoutId = null;
+            this.#meditationStartTime = null;
             this.#stopAllBells();
             this.#stopSilentAudio();
             this.#setMediaSessionPlaying(false);
@@ -384,8 +381,41 @@
 
         // Timer
 
+        #tickCountdown() {
+            const elapsed = Date.now() - this.#delayStartTime;
+            const remaining = Math.ceil((5000 - elapsed) / 1000);
+
+            if (remaining > 0) {
+                this.#elements.countdown.textContent = remaining;
+            } else {
+                clearInterval(this.#countdownId);
+                this.#countdownId = null;
+                this.#elements.timer.style.display = 'block';
+                this.#elements.countdown.textContent = '';
+                this.#delayStartTime = null;
+
+                // Start meditation phase
+                this.#meditationStartTime = Date.now();
+                this.#playBell();
+                this.#elements.status.textContent = 'Timer running...';
+
+                // Schedule completion at correct wall-clock time
+                this.#completionTimeoutId = setTimeout(() => {
+                    if (this.#meditationStartTime !== null) {
+                        this.#timeRemaining = 0;
+                        this.#updateTimerDisplay();
+                        this.#complete();
+                    }
+                }, this.#selectedDuration * 1000);
+
+                this.#intervalId = setInterval(() => this.#tick(), 1000);
+            }
+            this.#updateMediaSessionPosition();
+        }
+
         #tick() {
-            this.#timeRemaining--;
+            const elapsed = Math.floor((Date.now() - this.#meditationStartTime) / 1000);
+            this.#timeRemaining = Math.max(0, this.#selectedDuration - elapsed);
             this.#updateTimerDisplay();
             this.#updateMediaSessionPosition();
 
@@ -396,6 +426,9 @@
 
         async #complete() {
             clearInterval(this.#intervalId);
+            clearTimeout(this.#completionTimeoutId);
+            this.#completionTimeoutId = null;
+            this.#meditationStartTime = null;
             this.#stopSilentAudio();
             this.#setMediaSessionPlaying(false);
 
