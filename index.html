@@ -37,6 +37,7 @@ class MeditationTimer {
     #gain = null;
     #intervalId = null;
     #timeRemaining = MeditationTimer.DURATION;
+    #selectedDuration = 10;
 
     #elements;
 
@@ -50,6 +51,26 @@ class MeditationTimer {
 
         this.#elements.startBtn.addEventListener('click', () => this.start());
         this.#elements.stopBtn.addEventListener('click', () => this.stop());
+
+        document.querySelectorAll('.preset-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => this.#selectDuration(e.target));
+        });
+
+        this.#updateTimerDisplay();
+    }
+
+    #selectDuration(button) {
+        document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
+        button.classList.add('active');
+        this.#selectedDuration = parseInt(button.dataset.duration);
+        this.#timeRemaining = this.#selectedDuration;
+        this.#updateTimerDisplay();
+    }
+
+    #updateTimerDisplay() {
+        const minutes = Math.floor(this.#timeRemaining / 60);
+        const seconds = this.#timeRemaining % 60;
+        this.#elements.timer.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
     }
 
     // Public API
@@ -61,8 +82,9 @@ class MeditationTimer {
         this.#playBell();
         this.#startSilentAudio();
 
-        this.#timeRemaining = MeditationTimer.DURATION;
-        this.#updateDisplay('Timer running...');
+        this.#timeRemaining = this.#selectedDuration;
+        this.#updateTimerDisplay();
+        this.#elements.status.textContent = 'Timer running...';
         this.#setButtonState(true);
         this.#updateMediaSessionPosition();
 
@@ -74,8 +96,9 @@ class MeditationTimer {
         this.#stopSilentAudio();
         this.#setMediaSessionPlaying(false);
 
-        this.#timeRemaining = MeditationTimer.DURATION;
-        this.#updateDisplay('Stopped');
+        this.#timeRemaining = this.#selectedDuration;
+        this.#updateTimerDisplay();
+        this.#elements.status.textContent = 'Stopped';
         this.#setButtonState(false);
         this.#updateMediaSessionPosition();
     }
@@ -184,9 +207,9 @@ class MeditationTimer {
 
         try {
             navigator.mediaSession.setPositionState({
-                duration: MeditationTimer.DURATION,
+                duration: this.#selectedDuration,
                 playbackRate: 1,
-                position: MeditationTimer.DURATION - this.#timeRemaining,
+                position: this.#selectedDuration - this.#timeRemaining,
             });
         } catch (err) {
             console.log('setPositionState not supported:', err);
@@ -203,7 +226,8 @@ class MeditationTimer {
 
     #tick() {
         this.#timeRemaining--;
-        this.#updateDisplay('Timer running...');
+        this.#updateTimerDisplay();
+        this.#elements.status.textContent = 'Timer running...';
         this.#updateMediaSessionPosition();
 
         if (this.#timeRemaining <= 0) {
@@ -217,18 +241,13 @@ class MeditationTimer {
         this.#playBell();
         this.#setMediaSessionPlaying(false);
 
-        this.#elements.timer.textContent = '0';
+        this.#elements.timer.textContent = '0:00';
         this.#elements.status.textContent = 'Time up!';
         this.#setButtonState(false);
         this.#updateMediaSessionPosition();
     }
 
     // UI
-
-    #updateDisplay(status) {
-        this.#elements.timer.textContent = this.#timeRemaining;
-        this.#elements.status.textContent = status;
-    }
 
     #setButtonState(running) {
         this.#elements.startBtn.disabled = running;
