@@ -305,13 +305,18 @@ class MeditationTimer {
     #complete() {
         clearInterval(this.#intervalId);
         this.#stopSilentAudio();
-        this.#playBell();
         this.#setMediaSessionPlaying(false);
 
         this.#elements.timer.textContent = '0:00';
         this.#elements.status.textContent = 'Time up!';
         this.#setButtonState(false);
         this.#updateMediaSessionPosition();
+
+        // Play bell four times to gently bring user back
+        this.#playBell();
+        setTimeout(() => this.#playBell(), 7000);
+        setTimeout(() => this.#playBell(), 14000);
+        setTimeout(() => this.#playBell(), 21000);
     }
 
     // UI
