@@ -16,8 +16,8 @@
 <body>
 <h1>Meditation Timer</h1>
 <div id="timer">10</div>
+<div id="countdown"></div>
 <p id="status">Ready</p>
-<p id="countdown"></p>
 <div id="presetButtons">
     <button data-duration="300" class="preset-btn">5 min</button>
     <button data-duration="600" class="preset-btn">10 min</button>
@@ -92,7 +92,7 @@ class MeditationTimer {
 
         // Show countdown
         let countdownSeconds = 5;
-        this.#elements.countdown.style.display = 'block';
+        this.#elements.timer.style.display = 'none';
         this.#elements.countdown.textContent = countdownSeconds;
 
         this.#countdownId = setInterval(() => {
@@ -101,12 +101,12 @@ class MeditationTimer {
                 this.#elements.countdown.textContent = countdownSeconds;
             } else {
                 clearInterval(this.#countdownId);
-                this.#elements.countdown.style.display = 'none';
+                this.#elements.timer.style.display = 'block';
+                this.#elements.countdown.textContent = '';
                 this.#playBell();
+                this.#intervalId = setInterval(() => this.#tick(), 1000);
             }
         }, 1000);
-
-        this.#intervalId = setInterval(() => this.#tick(), 1000);
     }
 
     stop() {
@@ -115,7 +115,8 @@ class MeditationTimer {
         this.#stopSilentAudio();
         this.#setMediaSessionPlaying(false);
 
-        this.#elements.countdown.style.display = 'none';
+        this.#elements.timer.style.display = 'block';
+        this.#elements.countdown.textContent = '';
         this.#timeRemaining = this.#selectedDuration;
         this.#updateTimerDisplay();
         this.#elements.status.textContent = 'Stopped';
