@@ -17,6 +17,7 @@
 <h1>Meditation Timer</h1>
 <div id="timer">10</div>
 <p id="status">Ready</p>
+<p id="countdown"></p>
 <div id="presetButtons">
     <button data-duration="300" class="preset-btn">5 min</button>
     <button data-duration="600" class="preset-btn">10 min</button>
@@ -36,6 +37,7 @@ class MeditationTimer {
     #oscillator = null;
     #gain = null;
     #intervalId = null;
+    #countdownId = null;
     #timeRemaining = MeditationTimer.DURATION;
     #selectedDuration = 10;
 
@@ -47,6 +49,7 @@ class MeditationTimer {
             startBtn: document.getElementById('startBtn'),
             stopBtn: document.getElementById('stopBtn'),
             status: document.getElementById('status'),
+            countdown: document.getElementById('countdown'),
         };
 
         this.#elements.startBtn.addEventListener('click', () => this.start());
@@ -79,7 +82,6 @@ class MeditationTimer {
         this.#resetAudio();
         this.#setupAudioSession();
         this.#updateMediaSession();
-        this.#playBell();
         this.#startSilentAudio();
 
         this.#timeRemaining = this.#selectedDuration;
@@ -88,14 +90,32 @@ class MeditationTimer {
         this.#setButtonState(true);
         this.#updateMediaSessionPosition();
 
+        // Show countdown
+        let countdownSeconds = 5;
+        this.#elements.countdown.style.display = 'block';
+        this.#elements.countdown.textContent = countdownSeconds;
+
+        this.#countdownId = setInterval(() => {
+            countdownSeconds--;
+            if (countdownSeconds > 0) {
+                this.#elements.countdown.textContent = countdownSeconds;
+            } else {
+                clearInterval(this.#countdownId);
+                this.#elements.countdown.style.display = 'none';
+                this.#playBell();
+            }
+        }, 1000);
+
         this.#intervalId = setInterval(() => this.#tick(), 1000);
     }
 
     stop() {
         clearInterval(this.#intervalId);
+        clearInterval(this.#countdownId);
         this.#stopSilentAudio();
         this.#setMediaSessionPlaying(false);
 
+        this.#elements.countdown.style.display = 'none';
         this.#timeRemaining = this.#selectedDuration;
         this.#updateTimerDisplay();
         this.#elements.status.textContent = 'Stopped';
