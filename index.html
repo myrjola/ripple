@@ -89,7 +89,7 @@ class MeditationTimer {
 
         this.#timeRemaining = this.#selectedDuration;
         this.#updateTimerDisplay();
-        this.#elements.status.textContent = 'Timer running...';
+        this.#elements.status.textContent = 'Get ready';
         this.#setButtonState(true);
         this.#updateMediaSessionPosition();
 
@@ -109,6 +109,7 @@ class MeditationTimer {
                 this.#elements.countdown.textContent = '';
                 this.#delayStartTime = null;
                 this.#playBell();
+                this.#elements.status.textContent = 'Timer running...';
                 this.#intervalId = setInterval(() => this.#tick(), 1000);
             }
             this.#updateMediaSessionPosition();
@@ -306,7 +307,9 @@ class MeditationTimer {
         });
 
         this.#setMediaSessionPlaying(true);
-        navigator.mediaSession.setActionHandler('stop', () => this.stop());
+        navigator.mediaSession.setActionHandler('play', null);
+        navigator.mediaSession.setActionHandler('pause', null);
+        navigator.mediaSession.setActionHandler('stop', this.stop);
     }
 
     #updateMediaSessionPosition() {
@@ -346,7 +349,6 @@ class MeditationTimer {
     #tick() {
         this.#timeRemaining--;
         this.#updateTimerDisplay();
-        this.#elements.status.textContent = 'Timer running...';
         this.#updateMediaSessionPosition();
 
         if (this.#timeRemaining <= 0) {
