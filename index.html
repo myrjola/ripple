@@ -38,6 +38,9 @@ class MeditationTimer {
     #gain = null;
     #intervalId = null;
     #countdownId = null;
+    #activeNodes = [];
+    #bellTimeouts = [];
+    #delayStartTime = null;
     #timeRemaining = MeditationTimer.DURATION;
     #selectedDuration = 10;
 
@@ -94,6 +97,7 @@ class MeditationTimer {
         let countdownSeconds = 5;
         this.#elements.timer.style.display = 'none';
         this.#elements.countdown.textContent = countdownSeconds;
+        this.#delayStartTime = Date.now();
 
         this.#countdownId = setInterval(() => {
             countdownSeconds--;
@@ -103,18 +107,22 @@ class MeditationTimer {
                 clearInterval(this.#countdownId);
                 this.#elements.timer.style.display = 'block';
                 this.#elements.countdown.textContent = '';
+                this.#delayStartTime = null;
                 this.#playBell();
                 this.#intervalId = setInterval(() => this.#tick(), 1000);
             }
+            this.#updateMediaSessionPosition();
         }, 1000);
     }
 
     stop() {
         clearInterval(this.#intervalId);
         clearInterval(this.#countdownId);
+        this.#stopAllBells();
         this.#stopSilentAudio();
         this.#setMediaSessionPlaying(false);
 
+        this.#delayStartTime = null;
         this.#elements.timer.style.display = 'block';
         this.#elements.countdown.textContent = '';
         this.#timeRemaining = this.#selectedDuration;
@@ -194,6 +202,13 @@ class MeditationTimer {
             gain.gain.linearRampToValueAtTime(amp, now + 0.003);
             gain.gain.exponentialRampToValueAtTime(0.001, now + decay);
 
+            // Track node for cleanup
+            this.#activeNodes.push(osc);
+            osc.onended = () => {
+                const idx = this.#activeNodes.indexOf(osc);
+                if (idx > -1) this.#activeNodes.splice(idx, 1);
+            };
+
             osc.start(now);
             osc.stop(now + decay + 0.1);
         });
@@ -223,14 +238,40 @@ class MeditationTimer {
         strikeFilter.connect(strikeGain);
         strikeGain.connect(ctx.destination);
 
+        // Track noise node for cleanup
+        this.#activeNodes.push(noise);
+        noise.onended = () => {
+            const idx = this.#activeNodes.indexOf(noise);
+            if (idx > -1) this.#activeNodes.splice(idx, 1);
+        };
+
         noise.start(now);
         noise.stop(now + strikeLength);
     }
 
+    #stopAllBells() {
+        // Stop all active audio nodes
+        this.#activeNodes.forEach(node => {
+            try {
+                node.stop();
+                node.disconnect();
+            } catch (e) {
+                // Node may already be stopped
+            }
+        });
+        this.#activeNodes = [];
+
+        // Clear all scheduled bell timeouts
+        this.#bellTimeouts.forEach(id => clearTimeout(id));
+        this.#bellTimeouts = [];
+    }
+
     #resetAudio() {
         clearInterval(this.#intervalId);
+        this.#stopAllBells();
         this.#stopSilentAudio();
         this.#setMediaSessionPlaying(false);
+        this.#delayStartTime = null;
 
         if (this.#audioContext) {
             this.#audioContext.close();
@@ -265,18 +306,29 @@ class MeditationTimer {
         });
 
         this.#setMediaSessionPlaying(true);
-        navigator.mediaSession.setActionHandler('pause', () => this.stop());
-        navigator.mediaSession.setActionHandler('play', () => this.start());
+        navigator.mediaSession.setActionHandler('stop', () => this.stop());
     }
 
     #updateMediaSessionPosition() {
         if (!('mediaSession' in navigator) || !navigator.mediaSession.setPositionState) return;
 
+        const DELAY = 5;
+        const totalDuration = this.#selectedDuration + DELAY;
+
+        let position;
+        if (this.#delayStartTime !== null) {
+            // During delay: position is elapsed time from start
+            position = Math.round((Date.now() - this.#delayStartTime) / 1000);
+        } else {
+            // During meditation: position is delay + elapsed meditation time
+            position = DELAY + (this.#selectedDuration - this.#timeRemaining);
+        }
+
         try {
             navigator.mediaSession.setPositionState({
-                duration: this.#selectedDuration,
+                duration: totalDuration,
                 playbackRate: 1,
-                position: this.#selectedDuration - this.#timeRemaining,
+                position: position,
             });
         } catch (err) {
             console.log('setPositionState not supported:', err);
@@ -314,9 +366,9 @@ class MeditationTimer {
 
         // Play bell four times to gently bring user back
         this.#playBell();
-        setTimeout(() => this.#playBell(), 7000);
-        setTimeout(() => this.#playBell(), 14000);
-        setTimeout(() => this.#playBell(), 21000);
+        this.#bellTimeouts.push(setTimeout(() => this.#playBell(), 7000));
+        this.#bellTimeouts.push(setTimeout(() => this.#playBell(), 14000));
+        this.#bellTimeouts.push(setTimeout(() => this.#playBell(), 21000));
     }
 
     // UI
