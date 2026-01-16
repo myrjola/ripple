@@ -16,9 +16,17 @@
 <body>
 <h1>Meditation Timer</h1>
 <div id="timer">10</div>
-<button id="startBtn">Start 10s Timer</button>
-<button id="stopBtn" disabled>Stop</button>
 <p id="status">Ready</p>
+<div id="presetButtons">
+    <button data-duration="300" class="preset-btn">5 min</button>
+    <button data-duration="600" class="preset-btn">10 min</button>
+    <button data-duration="900" class="preset-btn">15 min</button>
+    <button data-duration="1200" class="preset-btn">20 min</button>
+</div>
+<div id="controlButtons">
+    <button id="startBtn">Start</button>
+    <button id="stopBtn" disabled>Stop</button>
+</div>
 
 <script>
 class MeditationTimer {
@@ -48,7 +56,7 @@ class MeditationTimer {
 
     async start() {
         this.#resetAudio();
-        await this.#setupAudioSession();
+        this.#setupAudioSession();
         this.#updateMediaSession();
         this.#playBell();
         this.#startSilentAudio();
@@ -143,7 +151,7 @@ class MeditationTimer {
 
     // Media Session
 
-    async #setupAudioSession() {
+    #setupAudioSession() {
         if ('audioSession' in navigator) {
             try {
                 navigator.audioSession.type = 'playback';
