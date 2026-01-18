@@ -85,7 +85,20 @@
                 }
             });
 
-            this.#updateTimerDisplay();
+            // Restore saved duration from localStorage
+            const savedDuration = localStorage.getItem('selectedDuration');
+            if (savedDuration) {
+                const duration = parseInt(savedDuration);
+                const button = Array.from(document.querySelectorAll('.preset-btn'))
+                    .find(btn => parseInt(btn.dataset.duration) === duration);
+                if (button) {
+                    this.#selectDuration(button);
+                } else {
+                    this.#updateTimerDisplay();
+                }
+            } else {
+                this.#updateTimerDisplay();
+            }
         }
 
         #selectDuration(button) {
@@ -93,6 +106,8 @@
             button.classList.add('active');
             this.#selectedDuration = parseInt(button.dataset.duration);
             this.#timeRemaining = this.#selectedDuration;
+            // Save selected duration to localStorage
+            localStorage.setItem('selectedDuration', this.#selectedDuration);
             this.#updateTimerDisplay();
         }
 
