@@ -76,6 +76,11 @@
                         this.#tickCountdown();
                     } else if (this.#meditationStartTime !== null) {
                         this.#tick();
+                    } else {
+                        // Reload app when returning from background with no active session
+                        // This reinitializes audio context, media session, and service worker
+                        // to prevent iOS PWA state degradation after days of inactivity
+                        location.reload();
                     }
                 }
             });
