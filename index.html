@@ -46,6 +46,7 @@
         #wakeLock = null;
         #meditationStartTime = null;
         #completionTimeoutId = null;
+        #bellSequencePlaying = false;
 
         #elements;
 
@@ -76,10 +77,11 @@
                         this.#tickCountdown();
                     } else if (this.#meditationStartTime !== null) {
                         this.#tick();
-                    } else {
+                    } else if (!this.#bellSequencePlaying) {
                         // Reload app when returning from background with no active session
-                        // This reinitializes audio context, media session, and service worker
-                        // to prevent iOS PWA state degradation after days of inactivity
+                        // and no bell sequence playing. This reinitializes audio context,
+                        // media session, and service worker to prevent iOS PWA state
+                        // degradation after days of inactivity
                         location.reload();
                     }
                 }
@@ -171,6 +173,7 @@
             clearTimeout(this.#completionTimeoutId);
             this.#completionTimeoutId = null;
             this.#meditationStartTime = null;
+            this.#bellSequencePlaying = false;
             this.#stopAllBells();
             this.#stopSilentAudio();
             this.#setMediaSessionPlaying(false);
@@ -449,6 +452,7 @@
             clearTimeout(this.#completionTimeoutId);
             this.#completionTimeoutId = null;
             this.#meditationStartTime = null;
+            this.#bellSequencePlaying = true;
             this.#stopSilentAudio();
             this.#setMediaSessionPlaying(false);
 
