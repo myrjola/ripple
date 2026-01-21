@@ -1,6 +1,6 @@
 {
-  "name": "Meditation Timer",
-  "short_name": "Meditation",
+  "name": "Ripple Meditation Timer",
+  "short_name": "Ripple",
   "description": "A meditation timer that works with the screen locked",
   "start_url": "/ripple",
   "scope": "/ripple",
