@@ -33,6 +33,23 @@
     class MeditationTimer {
         static DURATION = 10;
 
+        // Timing constants
+        static #COUNTDOWN_DURATION_MS = 5000;
+        static #BELL_INTERVAL_MS = 7000;
+        static #BELL_COUNT = 4;
+        static #BELL_SEQUENCE_DURATION_S = 27; // 21s for 4 bells + ~6s for final bell decay
+
+        // Audio constants
+        static #SILENT_AUDIO_FREQUENCY_HZ = 5;
+        static #BELL_FUNDAMENTAL_HZ = 220;
+        static #BELL_PARTIALS = [
+            { ratio: 1.0, amp: 0.4, decay: 6.0 },    // fundamental
+            { ratio: 2.71, amp: 0.25, decay: 4.5 },  // characteristic singing bowl partial
+            { ratio: 5.15, amp: 0.15, decay: 3.5 },  // higher partial
+            { ratio: 8.43, amp: 0.08, decay: 2.5 },  // shimmer
+            { ratio: 12.7, amp: 0.04, decay: 1.8 },  // brightness
+        ];
+
         #audioContext = null;
         #oscillator = null;
         #gain = null;
@@ -66,26 +83,7 @@
                 btn.addEventListener('click', (e) => this.#selectDuration(e.target));
             });
 
-            // Re-acquire wake lock and update display when page becomes visible again
-            document.addEventListener('visibilitychange', async () => {
-                if (document.visibilityState === 'visible') {
-                    if (this.#wakeLock !== null) {
-                        await this.#requestWakeLock();
-                    }
-                    // Update display immediately when returning to foreground
-                    if (this.#delayStartTime !== null) {
-                        this.#tickCountdown();
-                    } else if (this.#meditationStartTime !== null) {
-                        this.#tick();
-                    } else if (!this.#bellSequencePlaying) {
-                        // Reload app when returning from background with no active session
-                        // and no bell sequence playing. This reinitializes audio context,
-                        // media session, and service worker to prevent iOS PWA state
-                        // degradation after days of inactivity
-                        location.reload();
-                    }
-                }
-            });
+            document.addEventListener('visibilitychange', () => this.#handleVisibilityChange());
 
             // Restore saved duration from localStorage
             const savedDuration = localStorage.getItem('selectedDuration');
@@ -144,6 +142,34 @@
             }
         }
 
+        // Visibility
+
+        async #handleVisibilityChange() {
+            if (document.visibilityState !== 'visible') return;
+
+            if (this.#wakeLock !== null) {
+                await this.#requestWakeLock();
+            }
+            this.#syncDisplayOnResume();
+        }
+
+        #syncDisplayOnResume() {
+            if (this.#delayStartTime !== null) {
+                this.#tickCountdown();
+                return;
+            }
+            if (this.#meditationStartTime !== null) {
+                this.#tick();
+                return;
+            }
+            if (!this.#bellSequencePlaying) {
+                // Reload app when returning from background with no active session.
+                // This reinitializes audio context, media session, and service worker
+                // to prevent iOS PWA state degradation after days of inactivity.
+                location.reload();
+            }
+        }
+
         // Public API
 
         async start() {
@@ -168,18 +194,13 @@
 
         async stop() {
             console.log('stop')
-            clearInterval(this.#intervalId);
-            clearInterval(this.#countdownId);
-            clearTimeout(this.#completionTimeoutId);
-            this.#completionTimeoutId = null;
-            this.#meditationStartTime = null;
-            this.#bellSequencePlaying = false;
+            this.#clearAllTimers();
+            this.#resetTimingState();
             this.#stopAllBells();
             this.#stopSilentAudio();
             this.#setMediaSessionPlaying(false);
             await this.#releaseWakeLock();
 
-            this.#delayStartTime = null;
             this.#elements.timer.style.display = 'block';
             this.#elements.countdown.textContent = '';
             this.#timeRemaining = this.#selectedDuration;
@@ -211,7 +232,7 @@
             this.#gain.connect(this.#audioContext.destination);
 
             this.#gain.gain.setValueAtTime(0.001, this.#audioContext.currentTime);
-            this.#oscillator.frequency.value = 5;
+            this.#oscillator.frequency.value = MeditationTimer.#SILENT_AUDIO_FREQUENCY_HZ;
             this.#oscillator.start();
         }
 
@@ -228,19 +249,14 @@
 
             const now = this.#audioContext.currentTime;
             const ctx = this.#audioContext;
+            const fundamental = MeditationTimer.#BELL_FUNDAMENTAL_HZ;
 
-            // Tibetan singing bowl partials - inharmonic frequencies with relative amplitudes and decay times
-            const fundamental = 220;
-            const partials = [
-                {ratio: 1.0, amp: 0.4, decay: 6.0},  // fundamental
-                {ratio: 2.71, amp: 0.25, decay: 4.5},  // characteristic singing bowl partial
-                {ratio: 5.15, amp: 0.15, decay: 3.5},  // higher partial
-                {ratio: 8.43, amp: 0.08, decay: 2.5},  // shimmer
-                {ratio: 12.7, amp: 0.04, decay: 1.8},  // brightness
-            ];
+            this.#createBellPartials(ctx, now, fundamental);
+            this.#createStrikeTransient(ctx, now, fundamental);
+        }
 
-            // Create each partial with its own oscillator and envelope
-            partials.forEach(({ratio, amp, decay}) => {
+        #createBellPartials(ctx, now, fundamental) {
+            MeditationTimer.#BELL_PARTIALS.forEach(({ ratio, amp, decay }) => {
                 const osc = ctx.createOscillator();
                 const gain = ctx.createGain();
 
@@ -259,18 +275,13 @@
                 gain.gain.linearRampToValueAtTime(amp, now + 0.003);
                 gain.gain.exponentialRampToValueAtTime(0.001, now + decay);
 
-                // Track node for cleanup
-                this.#activeNodes.push(osc);
-                osc.onended = () => {
-                    const idx = this.#activeNodes.indexOf(osc);
-                    if (idx > -1) this.#activeNodes.splice(idx, 1);
-                };
-
+                this.#trackAudioNode(osc);
                 osc.start(now);
                 osc.stop(now + decay + 0.1);
             });
+        }
 
-            // Strike transient - short burst of filtered noise
+        #createStrikeTransient(ctx, now, fundamental) {
             const strikeLength = 0.08;
             const bufferSize = ctx.sampleRate * strikeLength;
             const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
@@ -295,15 +306,17 @@
             strikeFilter.connect(strikeGain);
             strikeGain.connect(ctx.destination);
 
-            // Track noise node for cleanup
-            this.#activeNodes.push(noise);
-            noise.onended = () => {
-                const idx = this.#activeNodes.indexOf(noise);
-                if (idx > -1) this.#activeNodes.splice(idx, 1);
-            };
-
+            this.#trackAudioNode(noise);
             noise.start(now);
             noise.stop(now + strikeLength);
+        }
+
+        #trackAudioNode(node) {
+            this.#activeNodes.push(node);
+            node.onended = () => {
+                const idx = this.#activeNodes.indexOf(node);
+                if (idx > -1) this.#activeNodes.splice(idx, 1);
+            };
         }
 
         #stopAllBells() {
@@ -324,11 +337,11 @@
         }
 
         #resetAudio() {
-            clearInterval(this.#intervalId);
+            this.#clearAllTimers();
+            this.#resetTimingState();
             this.#stopAllBells();
             this.#stopSilentAudio();
             this.#setMediaSessionPlaying(false);
-            this.#delayStartTime = null;
 
             if (this.#audioContext) {
                 this.#audioContext.close();
@@ -372,9 +385,8 @@
         #updateMediaSessionPosition() {
             if (!('mediaSession' in navigator) || !navigator.mediaSession.setPositionState) return;
 
-            const DELAY = 5;
-            const BELL_SEQUENCE_DURATION = 27; // 21s for 4 bells + ~6s for final bell decay
-            const totalDuration = this.#selectedDuration + DELAY + BELL_SEQUENCE_DURATION;
+            const delaySeconds = MeditationTimer.#COUNTDOWN_DURATION_MS / 1000;
+            const totalDuration = this.#selectedDuration + delaySeconds + MeditationTimer.#BELL_SEQUENCE_DURATION_S;
 
             let position;
             if (this.#delayStartTime !== null) {
@@ -382,7 +394,7 @@
                 position = Math.round((Date.now() - this.#delayStartTime) / 1000);
             } else {
                 // During meditation: position is delay + elapsed meditation time
-                position = DELAY + (this.#selectedDuration - this.#timeRemaining);
+                position = delaySeconds + (this.#selectedDuration - this.#timeRemaining);
             }
 
             try {
@@ -404,9 +416,25 @@
 
         // Timer
 
+        #clearAllTimers() {
+            if (this.#intervalId) clearInterval(this.#intervalId);
+            if (this.#countdownId) clearInterval(this.#countdownId);
+            if (this.#completionTimeoutId) clearTimeout(this.#completionTimeoutId);
+            this.#intervalId = null;
+            this.#countdownId = null;
+            this.#completionTimeoutId = null;
+        }
+
+        #resetTimingState() {
+            this.#meditationStartTime = null;
+            this.#completionTimeoutId = null;
+            this.#bellSequencePlaying = false;
+            this.#delayStartTime = null;
+        }
+
         #tickCountdown() {
             const elapsed = Date.now() - this.#delayStartTime;
-            const remaining = Math.ceil((5000 - elapsed) / 1000);
+            const remaining = Math.ceil((MeditationTimer.#COUNTDOWN_DURATION_MS - elapsed) / 1000);
 
             if (remaining > 0) {
                 this.#elements.countdown.textContent = remaining;
@@ -448,10 +476,9 @@
         }
 
         async #complete() {
-            clearInterval(this.#intervalId);
-            clearTimeout(this.#completionTimeoutId);
-            this.#completionTimeoutId = null;
+            this.#clearAllTimers();
             this.#meditationStartTime = null;
+            this.#delayStartTime = null;
             this.#bellSequencePlaying = true;
             this.#stopSilentAudio();
             this.#setMediaSessionPlaying(false);
@@ -461,13 +488,21 @@
             this.#setButtonState(false);
             this.#updateMediaSessionPosition();
 
-            // Play bell four times to gently bring user back
-            this.#playBell();
-            this.#bellTimeouts.push(setTimeout(() => this.#playBell(), 7000));
-            this.#bellTimeouts.push(setTimeout(() => this.#playBell(), 14000));
-            this.#bellTimeouts.push(setTimeout(() => this.#playBell(), 21000));
-            this.#bellTimeouts.push(setTimeout(() => this.stop(), 28000));
+            this.#scheduleCompletionBells();
+        }
 
+        #scheduleCompletionBells() {
+            const interval = MeditationTimer.#BELL_INTERVAL_MS;
+            const count = MeditationTimer.#BELL_COUNT;
+
+            for (let i = 0; i < count; i++) {
+                this.#bellTimeouts.push(
+                    setTimeout(() => this.#playBell(), i * interval)
+                );
+            }
+            this.#bellTimeouts.push(
+                setTimeout(() => this.stop(), count * interval)
+            );
         }
 
         // UI

@@ -2,6 +2,7 @@ const CACHE_NAME = 'meditation-timer-v1';
 const FILES_TO_CACHE = [
   '/',
   '/index.html',
+  '/style.css',
   '/manifest.json'
 ];
 
@@ -9,11 +10,11 @@ const FILES_TO_CACHE = [
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(FILES_TO_CACHE).catch(() => {
-        // Ignore cache errors
+      return cache.addAll(FILES_TO_CACHE).catch((err) => {
+        console.warn('Cache addAll failed:', err);
       });
-    }).catch(() => {
-      // Ignore errors
+    }).catch((err) => {
+      console.warn('Cache open failed:', err);
     })
   );
   self.skipWaiting();
@@ -30,8 +31,8 @@ self.addEventListener('activate', (event) => {
           }
         })
       );
-    }).catch(() => {
-      // Ignore errors
+    }).catch((err) => {
+      console.warn('Cache cleanup failed:', err);
     })
   );
   self.clients.claim();
@@ -42,7 +43,8 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     caches.match(event.request).then((response) => {
       return response || fetch(event.request);
-    }).catch(() => {
+    }).catch((err) => {
+      console.warn('Cache match failed:', err);
       return fetch(event.request);
     })
   );
