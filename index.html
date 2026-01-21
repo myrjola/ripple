@@ -31,44 +31,26 @@
 
 <script>
     class MeditationTimer {
-        // ==================== Configuration ====================
+        static DURATION = 10;
 
-        static DURATION = 10;                  // Default duration in seconds
-        static COUNTDOWN_DELAY = 5;            // Seconds to count down before meditation starts
-        static BELL_SEQUENCE_DURATION = 27;    // Duration of ending bell sequence (21s for 4 bells + ~6s decay)
-        static COMPLETION_BELL_INTERVALS = [0, 7000, 14000, 21000];  // Bell timing at end of session
-        static AUTO_STOP_DELAY = 28000;        // Auto-stop after final bell sequence
-
-        // ==================== Private State ====================
-
-        // Audio
         #audioContext = null;
         #oscillator = null;
         #gain = null;
-        #activeNodes = [];
-        #bellTimeouts = [];
-
-        // Timers
         #intervalId = null;
         #countdownId = null;
-        #completionTimeoutId = null;
-
-        // Timing state (wall-clock based for accuracy when app is backgrounded)
+        #activeNodes = [];
+        #bellTimeouts = [];
         #delayStartTime = null;
-        #meditationStartTime = null;
         #timeRemaining = MeditationTimer.DURATION;
         #selectedDuration = 10;
-
-        // Platform APIs
         #wakeLock = null;
+        #meditationStartTime = null;
+        #completionTimeoutId = null;
+        #bellSequencePlaying = false;
 
-        // DOM elements
         #elements;
 
-        // ==================== Initialization ====================
-
         constructor() {
-            // Cache DOM elements
             this.#elements = {
                 timer: document.getElementById('timer'),
                 startBtn: document.getElementById('startBtn'),
@@ -77,34 +59,92 @@
                 countdown: document.getElementById('countdown'),
             };
 
-            // Bind control buttons
             this.#elements.startBtn.addEventListener('click', () => this.start());
             this.#elements.stopBtn.addEventListener('click', () => this.stop());
 
-            // Bind duration preset buttons
             document.querySelectorAll('.preset-btn').forEach(btn => {
                 btn.addEventListener('click', (e) => this.#selectDuration(e.target));
             });
 
-            // Handle page visibility changes (e.g., returning from lock screen)
-            // Re-acquires wake lock and syncs display with wall-clock time
+            // Re-acquire wake lock and update display when page becomes visible again
             document.addEventListener('visibilitychange', async () => {
                 if (document.visibilityState === 'visible') {
                     if (this.#wakeLock !== null) {
                         await this.#requestWakeLock();
                     }
+                    // Update display immediately when returning to foreground
                     if (this.#delayStartTime !== null) {
                         this.#tickCountdown();
                     } else if (this.#meditationStartTime !== null) {
                         this.#tick();
+                    } else if (!this.#bellSequencePlaying) {
+                        // Reload app when returning from background with no active session
+                        // and no bell sequence playing. This reinitializes audio context,
+                        // media session, and service worker to prevent iOS PWA state
+                        // degradation after days of inactivity
+                        location.reload();
                     }
                 }
             });
 
+            // Restore saved duration from localStorage
+            const savedDuration = localStorage.getItem('selectedDuration');
+            if (savedDuration) {
+                const duration = parseInt(savedDuration);
+                const button = Array.from(document.querySelectorAll('.preset-btn'))
+                    .find(btn => parseInt(btn.dataset.duration) === duration);
+                if (button) {
+                    this.#selectDuration(button);
+                } else {
+                    this.#updateTimerDisplay();
+                }
+            } else {
+                this.#updateTimerDisplay();
+            }
+        }
+
+        #selectDuration(button) {
+            document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
+            button.classList.add('active');
+            this.#selectedDuration = parseInt(button.dataset.duration);
+            this.#timeRemaining = this.#selectedDuration;
+            // Save selected duration to localStorage
+            localStorage.setItem('selectedDuration', this.#selectedDuration);
             this.#updateTimerDisplay();
         }
 
-        // ==================== Public API ====================
+        #updateTimerDisplay() {
+            const minutes = Math.floor(this.#timeRemaining / 60);
+            const seconds = this.#timeRemaining % 60;
+            this.#elements.timer.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }
+
+        // Wake Lock
+
+        async #requestWakeLock() {
+            try {
+                if ('wakeLock' in navigator) {
+                    this.#wakeLock = await navigator.wakeLock.request('screen');
+                    console.log('Wake Lock acquired');
+                }
+            } catch (err) {
+                console.log('Wake Lock request failed:', err);
+            }
+        }
+
+        async #releaseWakeLock() {
+            if (this.#wakeLock !== null) {
+                try {
+                    await this.#wakeLock.release();
+                    console.log('Wake Lock released');
+                } catch (err) {
+                    console.log('Wake Lock release failed:', err);
+                }
+                this.#wakeLock = null;
+            }
+        }
+
+        // Public API
 
         async start() {
             this.#resetAudio();
@@ -119,30 +159,26 @@
             this.#setButtonState(true);
             this.#updateMediaSessionPosition();
 
-            // Begin countdown phase
+            // Show countdown
             this.#elements.timer.style.display = 'none';
             this.#delayStartTime = Date.now();
-            this.#elements.countdown.textContent = String(MeditationTimer.COUNTDOWN_DELAY);
+            this.#elements.countdown.textContent = '5';
             this.#countdownId = setInterval(() => this.#tickCountdown(), 100);
         }
 
         async stop() {
-            // Clear all timers
+            console.log('stop')
             clearInterval(this.#intervalId);
             clearInterval(this.#countdownId);
             clearTimeout(this.#completionTimeoutId);
             this.#completionTimeoutId = null;
             this.#meditationStartTime = null;
-
-            // Stop audio
+            this.#bellSequencePlaying = false;
             this.#stopAllBells();
             this.#stopSilentAudio();
-
-            // Release platform resources
             this.#setMediaSessionPlaying(false);
             await this.#releaseWakeLock();
 
-            // Reset UI
             this.#delayStartTime = null;
             this.#elements.timer.style.display = 'block';
             this.#elements.countdown.textContent = '';
@@ -153,106 +189,8 @@
             this.#updateMediaSessionPosition();
         }
 
-        // ==================== Duration Selection ====================
+        // Audio
 
-        #selectDuration(button) {
-            document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
-            button.classList.add('active');
-            this.#selectedDuration = parseInt(button.dataset.duration);
-            this.#timeRemaining = this.#selectedDuration;
-            this.#updateTimerDisplay();
-        }
-
-        #updateTimerDisplay() {
-            const minutes = Math.floor(this.#timeRemaining / 60);
-            const seconds = this.#timeRemaining % 60;
-            this.#elements.timer.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-        }
-
-        // ==================== Timer Logic ====================
-
-        // Handles the pre-meditation countdown (5, 4, 3, 2, 1...)
-        // Uses wall-clock time to stay accurate even if the app is backgrounded
-        #tickCountdown() {
-            const elapsed = Date.now() - this.#delayStartTime;
-            const remaining = Math.ceil((MeditationTimer.COUNTDOWN_DELAY * 1000 - elapsed) / 1000);
-
-            if (remaining > 0) {
-                this.#elements.countdown.textContent = remaining;
-            } else {
-                // Countdown complete - transition to meditation phase
-                clearInterval(this.#countdownId);
-                this.#countdownId = null;
-                this.#elements.timer.style.display = 'block';
-                this.#elements.countdown.textContent = '';
-                this.#delayStartTime = null;
-
-                // Start meditation
-                this.#meditationStartTime = Date.now();
-                this.#playBell();
-                this.#elements.status.textContent = 'Timer running...';
-
-                // Schedule completion using wall-clock timeout for reliability
-                // (setInterval can drift or pause when backgrounded)
-                this.#completionTimeoutId = setTimeout(() => {
-                    if (this.#meditationStartTime !== null) {
-                        this.#timeRemaining = 0;
-                        this.#updateTimerDisplay();
-                        this.#complete();
-                    }
-                }, this.#selectedDuration * 1000);
-
-                // Update display every second (visual only - completion is timeout-based)
-                this.#intervalId = setInterval(() => this.#tick(), 1000);
-            }
-            this.#updateMediaSessionPosition();
-        }
-
-        // Updates the display during meditation
-        // Calculates remaining time from wall-clock for accuracy after backgrounding
-        #tick() {
-            const elapsed = Math.floor((Date.now() - this.#meditationStartTime) / 1000);
-            this.#timeRemaining = Math.max(0, this.#selectedDuration - elapsed);
-            this.#updateTimerDisplay();
-            this.#updateMediaSessionPosition();
-
-            if (this.#timeRemaining <= 0) {
-                this.#complete();
-            }
-        }
-
-        // Called when meditation time is up
-        // Plays a sequence of bells spaced 7 seconds apart to gently bring user back
-        async #complete() {
-            clearInterval(this.#intervalId);
-            clearTimeout(this.#completionTimeoutId);
-            this.#completionTimeoutId = null;
-            this.#meditationStartTime = null;
-            this.#stopSilentAudio();
-            this.#setMediaSessionPlaying(false);
-
-            this.#elements.timer.textContent = '0:00';
-            this.#elements.status.textContent = 'Time up!';
-            this.#setButtonState(false);
-            this.#updateMediaSessionPosition();
-
-            // Play completion bell sequence
-            MeditationTimer.COMPLETION_BELL_INTERVALS.forEach(delay => {
-                if (delay === 0) {
-                    this.#playBell();
-                } else {
-                    this.#bellTimeouts.push(setTimeout(() => this.#playBell(), delay));
-                }
-            });
-
-            // Auto-stop after bell sequence completes
-            this.#bellTimeouts.push(setTimeout(() => this.stop(), MeditationTimer.AUTO_STOP_DELAY));
-        }
-
-        // ==================== Audio: Context & Silent Background ====================
-
-        // Initializes or resumes the Web Audio context
-        // Must handle 'suspended' state because browsers require user interaction before audio
         #initAudioContext() {
             if (!this.#audioContext) {
                 const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -263,8 +201,6 @@
             }
         }
 
-        // Plays an inaudible tone to keep the audio session alive
-        // This allows the bell to play even when the screen is locked
         #startSilentAudio() {
             this.#initAudioContext();
 
@@ -274,7 +210,6 @@
             this.#oscillator.connect(this.#gain);
             this.#gain.connect(this.#audioContext.destination);
 
-            // Near-silent: very low gain and sub-audible frequency
             this.#gain.gain.setValueAtTime(0.001, this.#audioContext.currentTime);
             this.#oscillator.frequency.value = 5;
             this.#oscillator.start();
@@ -288,24 +223,6 @@
             }
         }
 
-        // Cleans up all audio state for a fresh start
-        #resetAudio() {
-            clearInterval(this.#intervalId);
-            this.#stopAllBells();
-            this.#stopSilentAudio();
-            this.#setMediaSessionPlaying(false);
-            this.#delayStartTime = null;
-
-            if (this.#audioContext) {
-                this.#audioContext.close();
-                this.#audioContext = null;
-            }
-            this.#initAudioContext();
-        }
-
-        // ==================== Audio: Bell Sound ====================
-
-        // Synthesizes a Tibetan singing bowl sound using additive synthesis
         #playBell() {
             this.#initAudioContext();
 
@@ -315,7 +232,7 @@
             // Tibetan singing bowl partials - inharmonic frequencies with relative amplitudes and decay times
             const fundamental = 220;
             const partials = [
-                {ratio: 1.0, amp: 0.4, decay: 6.0},    // fundamental
+                {ratio: 1.0, amp: 0.4, decay: 6.0},  // fundamental
                 {ratio: 2.71, amp: 0.25, decay: 4.5},  // characteristic singing bowl partial
                 {ratio: 5.15, amp: 0.15, decay: 3.5},  // higher partial
                 {ratio: 8.43, amp: 0.08, decay: 2.5},  // shimmer
@@ -353,7 +270,7 @@
                 osc.stop(now + decay + 0.1);
             });
 
-            // Strike transient - short burst of filtered noise to simulate mallet impact
+            // Strike transient - short burst of filtered noise
             const strikeLength = 0.08;
             const bufferSize = ctx.sampleRate * strikeLength;
             const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
@@ -406,36 +323,22 @@
             this.#bellTimeouts = [];
         }
 
-        // ==================== Wake Lock ====================
+        #resetAudio() {
+            clearInterval(this.#intervalId);
+            this.#stopAllBells();
+            this.#stopSilentAudio();
+            this.#setMediaSessionPlaying(false);
+            this.#delayStartTime = null;
 
-        // Prevents the screen from turning off during meditation
-        async #requestWakeLock() {
-            try {
-                if ('wakeLock' in navigator) {
-                    this.#wakeLock = await navigator.wakeLock.request('screen');
-                    console.log('Wake Lock acquired');
-                }
-            } catch (err) {
-                console.log('Wake Lock request failed:', err);
+            if (this.#audioContext) {
+                this.#audioContext.close();
+                this.#audioContext = null;
             }
+            this.#initAudioContext();
         }
 
-        async #releaseWakeLock() {
-            if (this.#wakeLock !== null) {
-                try {
-                    await this.#wakeLock.release();
-                    console.log('Wake Lock released');
-                } catch (err) {
-                    console.log('Wake Lock release failed:', err);
-                }
-                this.#wakeLock = null;
-            }
-        }
+        // Media Session
 
-        // ==================== Media Session ====================
-
-        // Configures the audio session type for proper background audio behavior
-        // The 'playback' type signals to the OS that this is long-form audio content
         #setupAudioSession() {
             if ('audioSession' in navigator) {
                 try {
@@ -446,7 +349,6 @@
             }
         }
 
-        // Sets up lock screen / notification center controls
         #updateMediaSession() {
             if (!('mediaSession' in navigator)) return;
 
@@ -467,19 +369,20 @@
             navigator.mediaSession.setActionHandler('seekto', (i) => console.log('seekto', i));
         }
 
-        // Updates the progress bar shown in lock screen / notification center
         #updateMediaSessionPosition() {
             if (!('mediaSession' in navigator) || !navigator.mediaSession.setPositionState) return;
 
-            const totalDuration = this.#selectedDuration +
-                MeditationTimer.COUNTDOWN_DELAY +
-                MeditationTimer.BELL_SEQUENCE_DURATION;
+            const DELAY = 5;
+            const BELL_SEQUENCE_DURATION = 27; // 21s for 4 bells + ~6s for final bell decay
+            const totalDuration = this.#selectedDuration + DELAY + BELL_SEQUENCE_DURATION;
 
             let position;
             if (this.#delayStartTime !== null) {
+                // During delay: position is elapsed time from start
                 position = Math.round((Date.now() - this.#delayStartTime) / 1000);
             } else {
-                position = MeditationTimer.COUNTDOWN_DELAY + (this.#selectedDuration - this.#timeRemaining);
+                // During meditation: position is delay + elapsed meditation time
+                position = DELAY + (this.#selectedDuration - this.#timeRemaining);
             }
 
             try {
@@ -499,7 +402,75 @@
             }
         }
 
-        // ==================== UI State ====================
+        // Timer
+
+        #tickCountdown() {
+            const elapsed = Date.now() - this.#delayStartTime;
+            const remaining = Math.ceil((5000 - elapsed) / 1000);
+
+            if (remaining > 0) {
+                this.#elements.countdown.textContent = remaining;
+            } else {
+                clearInterval(this.#countdownId);
+                this.#countdownId = null;
+                this.#elements.timer.style.display = 'block';
+                this.#elements.countdown.textContent = '';
+                this.#delayStartTime = null;
+
+                // Start meditation phase
+                this.#meditationStartTime = Date.now();
+                this.#playBell();
+                this.#elements.status.textContent = 'Timer running...';
+
+                // Schedule completion at correct wall-clock time
+                this.#completionTimeoutId = setTimeout(() => {
+                    if (this.#meditationStartTime !== null) {
+                        this.#timeRemaining = 0;
+                        this.#updateTimerDisplay();
+                        this.#complete();
+                    }
+                }, this.#selectedDuration * 1000);
+
+                this.#intervalId = setInterval(() => this.#tick(), 1000);
+            }
+            this.#updateMediaSessionPosition();
+        }
+
+        #tick() {
+            const elapsed = Math.floor((Date.now() - this.#meditationStartTime) / 1000);
+            this.#timeRemaining = Math.max(0, this.#selectedDuration - elapsed);
+            this.#updateTimerDisplay();
+            this.#updateMediaSessionPosition();
+
+            if (this.#timeRemaining <= 0) {
+                this.#complete();
+            }
+        }
+
+        async #complete() {
+            clearInterval(this.#intervalId);
+            clearTimeout(this.#completionTimeoutId);
+            this.#completionTimeoutId = null;
+            this.#meditationStartTime = null;
+            this.#bellSequencePlaying = true;
+            this.#stopSilentAudio();
+            this.#setMediaSessionPlaying(false);
+
+            this.#elements.timer.textContent = '0:00';
+            this.#elements.status.textContent = 'Time up!';
+            this.#setButtonState(false);
+            this.#updateMediaSessionPosition();
+
+            // Play bell four times to gently bring user back
+            this.#playBell();
+            this.#bellTimeouts.push(setTimeout(() => this.#playBell(), 7000));
+            this.#bellTimeouts.push(setTimeout(() => this.#playBell(), 14000));
+            this.#bellTimeouts.push(setTimeout(() => this.#playBell(), 21000));
+            this.#bellTimeouts.push(setTimeout(() => this.stop(), 28000));
+
+        }
+
+        // UI
 
         #setButtonState(running) {
             this.#elements.startBtn.disabled = running;
@@ -509,9 +480,9 @@
 
     new MeditationTimer();
 
-    // Register service worker for PWA offline support
     if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('sw.js').catch(() => {});
+        navigator.serviceWorker.register('sw.js').catch(() => {
+        });
     }
 </script>
 </body>
