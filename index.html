@@ -522,6 +522,13 @@
             this.#elements.startBtn.hidden = running;
             this.#elements.stopBtn.hidden = !running;
 
+            // Move focus to the newly visible button
+            if (running) {
+                this.#elements.stopBtn.focus();
+            } else {
+                this.#elements.startBtn.focus();
+            }
+
             // Disable duration buttons when timer is running
             document.querySelectorAll('.preset-btn').forEach(btn => {
                 btn.disabled = running;
