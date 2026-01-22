@@ -35,7 +35,7 @@
         <legend class="visually-hidden">Session controls</legend>
         <div id="controlButtons">
             <button id="startBtn" aria-label="Start meditation session">Start</button>
-            <button id="stopBtn" disabled aria-label="Stop meditation session">Stop</button>
+            <button id="stopBtn" hidden aria-label="Stop meditation session">Stop</button>
         </div>
     </fieldset>
 </main>
@@ -519,8 +519,8 @@
         // UI
 
         #setButtonState(running) {
-            this.#elements.startBtn.disabled = running;
-            this.#elements.stopBtn.disabled = !running;
+            this.#elements.startBtn.hidden = running;
+            this.#elements.stopBtn.hidden = !running;
         }
     }
 
