@@ -11,23 +11,34 @@
     <link rel="manifest" href="manifest.json">
     <link rel="apple-touch-icon"
           href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><circle cx='90' cy='90' r='85' fill='%23667eea'/></svg>">
+    <link rel="stylesheet" href="/style.css">
     <title>Ripple - Meditation Timer</title>
 </head>
 <body>
-<h1>Meditation Timer</h1>
-<div id="timer">10</div>
-<div id="countdown"></div>
-<p id="status">Ready</p>
-<div id="presetButtons">
-    <button data-duration="300" class="preset-btn">5 min</button>
-    <button data-duration="600" class="preset-btn">10 min</button>
-    <button data-duration="900" class="preset-btn">15 min</button>
-    <button data-duration="1200" class="preset-btn">20 min</button>
-</div>
-<div id="controlButtons">
-    <button id="startBtn">Start</button>
-    <button id="stopBtn" disabled>Stop</button>
-</div>
+<header>
+    <h1>Meditation Timer</h1>
+</header>
+<main>
+    <div id="timer" role="status" aria-live="off" aria-label="Meditation timer">10</div>
+    <div id="countdown" role="status" aria-live="off" aria-label="Countdown seconds"></div>
+    <p id="status" role="status" aria-live="polite">Ready</p>
+    <fieldset>
+        <legend class="visually-hidden">Select meditation duration</legend>
+        <div id="presetButtons">
+            <button data-duration="300" class="preset-btn" aria-label="Set meditation duration to 5 minutes">5 min</button>
+            <button data-duration="600" class="preset-btn" aria-label="Set meditation duration to 10 minutes">10 min</button>
+            <button data-duration="900" class="preset-btn" aria-label="Set meditation duration to 15 minutes">15 min</button>
+            <button data-duration="1200" class="preset-btn" aria-label="Set meditation duration to 20 minutes">20 min</button>
+        </div>
+    </fieldset>
+    <fieldset>
+        <legend class="visually-hidden">Session controls</legend>
+        <div id="controlButtons">
+            <button id="startBtn" aria-label="Start meditation session">Start</button>
+            <button id="stopBtn" disabled aria-label="Stop meditation session">Stop</button>
+        </div>
+    </fieldset>
+</main>
 
 <script>
     class MeditationTimer {
