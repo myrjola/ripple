@@ -521,6 +521,11 @@
         #setButtonState(running) {
             this.#elements.startBtn.hidden = running;
             this.#elements.stopBtn.hidden = !running;
+
+            // Disable duration buttons when timer is running
+            document.querySelectorAll('.preset-btn').forEach(btn => {
+                btn.disabled = running;
+            });
         }
     }
 
