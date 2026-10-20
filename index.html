@@ -1425,6 +1425,7 @@ const layers = layerTargets(timer.phase);
 
 function frame(now) {
     raf = 0;
+    if (suspended) return;
     const dt = Math.min(0.1, Math.max(0, (now - lastFrame) / 1000));
     lastFrame = now;
     const phase = timer.phase;
@@ -1505,7 +1506,29 @@ function frame(now) {
     }
     if (moving) kick();
 }
-function kick() { if (!raf) raf = requestAnimationFrame(frame); }
+function kick() { if (!raf && !suspended) raf = requestAnimationFrame(frame); }
+
+/* ---------- Screen off ---------- */
+// While the page is hidden (screen locked, app in the background) nothing
+// renders: kick() is inert and a frame already requested is cancelled. The
+// timer keeps time and rings without the view, and every visual derives from
+// the clock, so the first frame back is current.
+let suspended = document.hidden;
+function suspend() {
+    suspended = true;
+    cancelAnimationFrame(raf);
+    raf = 0;
+}
+function resume() {
+    if (!suspended || document.hidden) return;
+    suspended = false;
+    lastFrame = performance.now();
+    dirty = true;
+    kick();
+}
+document.addEventListener('visibilitychange', () => (document.hidden ? suspend() : resume()));
+addEventListener('pagehide', suspend);
+addEventListener('pageshow', resume);
 
 Water.init();
 layout();
