@@ -100,6 +100,9 @@ class MeditationTimer extends EventTarget {
     #completionTimeoutId = null;
     #bellSequencePlaying = false;
     #wakeLock = null;
+    // Bumped by every start and stop, so a wake lock granted after its session
+    // ended is let go instead of kept.
+    #session = 0;
 
     #phase = 'idle';
     #duration;
@@ -172,13 +175,14 @@ class MeditationTimer extends EventTarget {
         this.#emit('change', { previous: this.#phase });
     }
 
-    // Audio starts before the first await: iOS only unlocks audio inside the tap's task.
+    // Audio starts inside the tap's task, the only place iOS unlocks it, and the
+    // countdown shows at once; the wake lock is granted whenever it is.
     async start() {
+        this.#session++;
         this.#resetAudio();
         this.#setupAudioSession();
         this.#updateMediaSession();
         this.#startSilentAudio();
-        await this.#requestWakeLock();
 
         this.#timeRemaining = this.#duration;
         this.#delayStartTime = Date.now();
@@ -186,9 +190,11 @@ class MeditationTimer extends EventTarget {
         this.#setPhase('getready');
         this.#updateMediaSessionPosition();
         this.#countdownId = setInterval(() => this.#tickCountdown(), 100);
+        await this.#requestWakeLock();
     }
 
     async stop() {
+        this.#session++;
         this.#clearAllTimers();
         this.#resetTimingState();
         this.#stopAllBells();
@@ -218,24 +224,33 @@ class MeditationTimer extends EventTarget {
 
     // Wake Lock
 
+    // A grant for a session that has since ended is released at once; a grant
+    // for the current one replaces whatever lock it held before.
     async #requestWakeLock() {
+        if (!('wakeLock' in navigator)) return;
+        const session = this.#session;
         try {
-            if ('wakeLock' in navigator) {
-                this.#wakeLock = await navigator.wakeLock.request('screen');
+            const lock = await navigator.wakeLock.request('screen');
+            if (session !== this.#session) {
+                await lock.release();
+                return;
             }
+            const previous = this.#wakeLock;
+            this.#wakeLock = lock;
+            await previous?.release();
         } catch (err) {
             console.log('Wake Lock request failed:', err);
         }
     }
 
     async #releaseWakeLock() {
-        if (this.#wakeLock !== null) {
-            try {
-                await this.#wakeLock.release();
-            } catch (err) {
-                console.log('Wake Lock release failed:', err);
-            }
-            this.#wakeLock = null;
+        const lock = this.#wakeLock;
+        if (lock === null) return;
+        this.#wakeLock = null;
+        try {
+            await lock.release();
+        } catch (err) {
+            console.log('Wake Lock release failed:', err);
         }
     }
 
