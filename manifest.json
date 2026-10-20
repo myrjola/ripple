@@ -6,12 +6,12 @@
   "scope": "/ripple",
   "display": "standalone",
   "orientation": "portrait-primary",
-  "theme_color": "#667eea",
-  "background_color": "#ffffff",
+  "theme_color": "#071118",
+  "background_color": "#050913",
   "categories": ["health", "productivity"],
   "screenshots": [
     {
-      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 540 720'><rect width='540' height='720' fill='%23f5f5f5'/><circle cx='270' cy='300' r='100' fill='%23667eea'/><text x='270' y='320' font-size='48' text-anchor='middle' fill='%23333'>10</text></svg>",
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 540 720'><rect width='540' height='720' fill='%23071118'/><circle cx='270' cy='300' r='150' fill='none' stroke='%23e3ebef' stroke-opacity='.2' stroke-width='2'/><path d='M270 150 A150 150 0 0 1 400 375' fill='none' stroke='%237fe3da' stroke-width='5' stroke-linecap='round'/><text x='270' y='320' font-size='60' font-weight='200' text-anchor='middle' fill='%23e3ebef'>10:00</text></svg>",
       "sizes": "540x720",
       "type": "image/svg+xml",
       "form_factor": "narrow"
@@ -19,13 +19,13 @@
   ],
   "icons": [
     {
-      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><circle cx='96' cy='96' r='90' fill='%23667eea'/></svg>",
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' fill='%23071118'/><circle cx='96' cy='96' r='66' fill='none' stroke='%237fe3da' stroke-opacity='.45' stroke-width='4'/><circle cx='96' cy='96' r='42' fill='none' stroke='%237fe3da' stroke-opacity='.85' stroke-width='4'/><circle cx='96' cy='96' r='17' fill='%237fe3da'/></svg>",
       "sizes": "192x192",
       "type": "image/svg+xml",
       "purpose": "any"
     },
     {
-      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><circle cx='256' cy='256' r='240' fill='%23667eea'/></svg>",
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' fill='%23071118'/><circle cx='256' cy='256' r='176' fill='none' stroke='%237fe3da' stroke-opacity='.45' stroke-width='10'/><circle cx='256' cy='256' r='112' fill='none' stroke='%237fe3da' stroke-opacity='.85' stroke-width='10'/><circle cx='256' cy='256' r='45' fill='%237fe3da'/></svg>",
       "sizes": "512x512",
       "type": "image/svg+xml",
       "purpose": "any"

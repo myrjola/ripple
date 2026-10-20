@@ -2,546 +2,1523 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#667eea">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#071118">
     <meta name="description" content="A meditation timer that works with the screen locked">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Ripple Meditation Timer">
     <link rel="manifest" href="manifest.json">
     <link rel="apple-touch-icon"
-          href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><circle cx='90' cy='90' r='85' fill='%23667eea'/></svg>">
-    <link rel="stylesheet" href="/style.css">
+          href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><rect width='180' height='180' fill='%23071118'/><circle cx='90' cy='90' r='62' fill='none' stroke='%237fe3da' stroke-opacity='.45' stroke-width='4'/><circle cx='90' cy='90' r='40' fill='none' stroke='%237fe3da' stroke-opacity='.85' stroke-width='4'/><circle cx='90' cy='90' r='16' fill='%237fe3da'/></svg>">
+    <link rel="stylesheet" href="style.css">
     <title>Ripple - Meditation Timer</title>
 </head>
-<body>
-<header>
-    <h1>Meditation Timer</h1>
-</header>
-<main>
-    <div id="timer" role="status" aria-live="off" aria-label="Meditation timer">10</div>
-    <div id="countdown" role="status" aria-live="off" aria-label="Countdown seconds"></div>
-    <p id="status" role="status" aria-live="polite">Ready</p>
-    <fieldset>
-        <legend class="visually-hidden">Select meditation duration</legend>
-        <div id="presetButtons">
-            <button data-duration="300" class="preset-btn" aria-label="Set meditation duration to 5 minutes">5 min</button>
-            <button data-duration="600" class="preset-btn" aria-label="Set meditation duration to 10 minutes">10 min</button>
-            <button data-duration="900" class="preset-btn" aria-label="Set meditation duration to 15 minutes">15 min</button>
-            <button data-duration="1200" class="preset-btn" aria-label="Set meditation duration to 20 minutes">20 min</button>
+<body data-phase="idle" data-summary="false">
+<canvas id="water" aria-hidden="true"></canvas>
+<div class="veil" aria-hidden="true"></div>
+<div class="app">
+    <header class="top">
+        <h1 class="brand"><span class="mark" aria-hidden="true"></span><span>Ripple</span></h1>
+        <button id="stillBtn" class="still" type="button" aria-pressed="false" aria-label="Still background">
+            <span class="glyph" aria-hidden="true"></span><span>Still</span>
+        </button>
+    </header>
+    <main class="main">
+        <div class="stage">
+            <div class="dial-wrap">
+                <div id="dial" role="slider" tabindex="0" aria-label="Duration" aria-valuemin="1" aria-valuemax="60" aria-valuenow="10" aria-valuetext="10 minutes">
+                    <canvas class="dial-canvas" aria-hidden="true"></canvas>
+                </div>
+                <div class="readout">
+                    <p class="phase-label" aria-hidden="true">Ready</p>
+                    <div id="clock" role="status" aria-live="off" aria-label="Meditation timer"><span class="mm">10</span><span class="ss">:00</span><i class="baseline" aria-hidden="true"></i></div>
+                    <p class="summary" aria-hidden="true"><span class="sum-n">10</span><span class="u">min</span></p>
+                    <p class="sub"><span class="sub-text" aria-hidden="true"><span class="hint-touch">Drag the ring</span><span class="hint-keys">Arrow keys adjust</span></span><span class="count-wrap"><span aria-hidden="true">Begin in </span><span id="countdown" role="status" aria-live="off" aria-label="Countdown seconds"></span></span></p>
+                </div>
+            </div>
+            <p id="status" class="visually-hidden" role="status" aria-live="polite">Ready</p>
+            <fieldset class="presets">
+                <legend class="visually-hidden">Select meditation duration</legend>
+                <div id="presetButtons"></div>
+            </fieldset>
         </div>
-    </fieldset>
-    <fieldset>
-        <legend class="visually-hidden">Session controls</legend>
-        <div id="controlButtons">
-            <button id="startBtn" aria-label="Start meditation session">Start</button>
-            <button id="stopBtn" hidden aria-label="Stop meditation session">Stop</button>
-        </div>
-    </fieldset>
-</main>
-
+        <fieldset class="controls">
+            <legend class="visually-hidden">Session controls</legend>
+            <button id="startBtn" class="btn primary" aria-label="Start meditation session">Start</button>
+            <button id="stopBtn" class="btn ghost" hidden aria-label="Stop meditation session">Stop</button>
+        </fieldset>
+    </main>
+</div>
+<div class="bubble" aria-hidden="true"></div>
 <script>
-    class MeditationTimer {
-        static DURATION = 10;
+/*
+ * The timer: timing, bells, wake lock and media session. It never touches the
+ * DOM; the view below renders from its events and state.
+ *
+ * Phases: idle -> getready (5 s) -> running -> complete (4 bells, 7 s apart) -> idle.
+ * Events (detail = timer.state, plus `previous` phase on 'change'):
+ *   'change' phase or duration changed
+ *   'tick'   countdown digit or clock second changed
+ *   'bell'   a bell struck; detail.kind is 'start' or 'end', detail.index counts end bells
+ * Smooth views read progressAt() / remainingAt() / countdownProgressAt() from
+ * requestAnimationFrame; all three derive from wall-clock time, so they stay
+ * right after the page was throttled or hidden.
+ * ?speed=N runs the meditation phase N times faster for demos; the get-ready
+ * countdown and the bells keep real time.
+ */
+class MeditationTimer extends EventTarget {
+    static PRESETS = [300, 600, 900, 1200];
+    static COUNTDOWN_SECONDS = 5;
 
-        // Timing constants
-        static #COUNTDOWN_DURATION_MS = 5000;
-        static #BELL_INTERVAL_MS = 7000;
-        static #BELL_COUNT = 4;
-        static #BELL_SEQUENCE_DURATION_S = 27; // 21s for 4 bells + ~6s for final bell decay
+    // Timing constants
+    static #COUNTDOWN_DURATION_MS = 5000;
+    static #BELL_INTERVAL_MS = 7000;
+    static #BELL_COUNT = 4;
+    static #BELL_SEQUENCE_DURATION_S = 27; // 21s for 4 bells + ~6s for final bell decay
 
-        // Audio constants
-        static #SILENT_AUDIO_FREQUENCY_HZ = 5;
-        static #BELL_FUNDAMENTAL_HZ = 220;
-        static #BELL_PARTIALS = [
-            { ratio: 1.0, amp: 0.4, decay: 6.0 },    // fundamental
-            { ratio: 2.71, amp: 0.25, decay: 4.5 },  // characteristic singing bowl partial
-            { ratio: 5.15, amp: 0.15, decay: 3.5 },  // higher partial
-            { ratio: 8.43, amp: 0.08, decay: 2.5 },  // shimmer
-            { ratio: 12.7, amp: 0.04, decay: 1.8 },  // brightness
-        ];
+    // Audio constants
+    static #SILENT_AUDIO_FREQUENCY_HZ = 5;
+    static #BELL_FUNDAMENTAL_HZ = 220;
+    static #BELL_PARTIALS = [
+        { ratio: 1.0, amp: 0.4, decay: 6.0 },    // fundamental
+        { ratio: 2.71, amp: 0.25, decay: 4.5 },  // characteristic singing bowl partial
+        { ratio: 5.15, amp: 0.15, decay: 3.5 },  // higher partial
+        { ratio: 8.43, amp: 0.08, decay: 2.5 },  // shimmer
+        { ratio: 12.7, amp: 0.04, decay: 1.8 },  // brightness
+    ];
 
-        #audioContext = null;
-        #oscillator = null;
-        #gain = null;
-        #intervalId = null;
-        #countdownId = null;
-        #activeNodes = [];
-        #bellTimeouts = [];
-        #delayStartTime = null;
-        #timeRemaining = MeditationTimer.DURATION;
-        #selectedDuration = 10;
-        #wakeLock = null;
-        #meditationStartTime = null;
-        #completionTimeoutId = null;
-        #bellSequencePlaying = false;
+    #audioContext = null;
+    #oscillator = null;
+    #gain = null;
+    #intervalId = null;
+    #countdownId = null;
+    #activeNodes = [];
+    #bellTimeouts = [];
+    #delayStartTime = null;
+    #meditationStartTime = null;
+    #completionTimeoutId = null;
+    #bellSequencePlaying = false;
+    #wakeLock = null;
 
-        #elements;
+    #phase = 'idle';
+    #duration;
+    #timeRemaining;
+    #countdown = 0;
+    #storageKey;
+    #speed;
+    #artist;
+    #artworkColor;
 
-        constructor() {
-            this.#elements = {
-                timer: document.getElementById('timer'),
-                startBtn: document.getElementById('startBtn'),
-                stopBtn: document.getElementById('stopBtn'),
-                status: document.getElementById('status'),
-                countdown: document.getElementById('countdown'),
-            };
+    constructor({ storageKey = 'selectedDuration', defaultDuration = 600, artist = 'Ripple', artworkColor = '#667eea' } = {}) {
+        super();
+        this.#storageKey = storageKey;
+        this.#artist = artist;
+        this.#artworkColor = artworkColor;
+        const speed = Number(new URLSearchParams(location.search).get('speed'));
+        this.#speed = speed > 0 ? speed : 1;
+        const saved = parseInt(localStorage.getItem(storageKey));
+        this.#duration = saved > 0 ? saved : defaultDuration;
+        this.#timeRemaining = this.#duration;
+        document.addEventListener('visibilitychange', () => this.#handleVisibilityChange());
+    }
 
-            this.#elements.startBtn.addEventListener('click', () => this.start());
-            this.#elements.stopBtn.addEventListener('click', () => this.stop());
+    get phase() { return this.#phase; }
+    get duration() { return this.#duration; }
+    // Whole seconds left, as ripple displays them; updated once per tick.
+    get remaining() { return this.#timeRemaining; }
+    get countdown() { return this.#countdown; }
+    get state() {
+        return {
+            phase: this.#phase,
+            duration: this.#duration,
+            remaining: this.#timeRemaining,
+            countdown: this.#countdown,
+            progress: this.progressAt(),
+        };
+    }
 
-            document.querySelectorAll('.preset-btn').forEach(btn => {
-                btn.addEventListener('click', (e) => this.#selectDuration(e.target));
-            });
+    // Fraction of the meditation elapsed: 0 before it starts, 1 once complete.
+    progressAt(now = Date.now()) {
+        if (this.#phase === 'complete') return 1;
+        if (this.#phase !== 'running') return 0;
+        return Math.min(1, this.#elapsedSeconds(now) / this.#duration);
+    }
 
-            document.addEventListener('visibilitychange', () => this.#handleVisibilityChange());
+    remainingAt(now = Date.now()) {
+        if (this.#phase === 'complete') return 0;
+        if (this.#phase !== 'running') return this.#duration;
+        return Math.max(0, this.#duration - this.#elapsedSeconds(now));
+    }
 
-            // Restore saved duration from localStorage
-            const savedDuration = localStorage.getItem('selectedDuration');
-            if (savedDuration) {
-                const duration = parseInt(savedDuration);
-                const button = Array.from(document.querySelectorAll('.preset-btn'))
-                    .find(btn => parseInt(btn.dataset.duration) === duration);
-                if (button) {
-                    this.#selectDuration(button);
-                } else {
-                    this.#updateTimerDisplay();
-                }
-            } else {
-                this.#updateTimerDisplay();
+    countdownProgressAt(now = Date.now()) {
+        if (this.#phase !== 'getready') return 0;
+        return Math.min(1, (now - this.#delayStartTime) / MeditationTimer.#COUNTDOWN_DURATION_MS);
+    }
+
+    // m:ss rounded up, which matches ripple's clock: 10:00 shows for the first second.
+    static format(seconds) {
+        const total = Math.max(0, Math.ceil(seconds - 1e-6));
+        const minutes = Math.floor(total / 60);
+        return `${minutes}:${(total % 60).toString().padStart(2, '0')}`;
+    }
+
+    // Ignored while a session runs, as ripple disables its preset buttons then.
+    setDuration(seconds) {
+        if (this.#phase === 'getready' || this.#phase === 'running') return;
+        this.#duration = seconds;
+        this.#timeRemaining = seconds;
+        localStorage.setItem(this.#storageKey, seconds);
+        this.#emit('change', { previous: this.#phase });
+    }
+
+    // Audio starts before the first await: iOS only unlocks audio inside the tap's task.
+    async start() {
+        this.#resetAudio();
+        this.#setupAudioSession();
+        this.#updateMediaSession();
+        this.#startSilentAudio();
+        await this.#requestWakeLock();
+
+        this.#timeRemaining = this.#duration;
+        this.#delayStartTime = Date.now();
+        this.#countdown = MeditationTimer.COUNTDOWN_SECONDS;
+        this.#setPhase('getready');
+        this.#updateMediaSessionPosition();
+        this.#countdownId = setInterval(() => this.#tickCountdown(), 100);
+    }
+
+    async stop() {
+        this.#clearAllTimers();
+        this.#resetTimingState();
+        this.#stopAllBells();
+        this.#stopSilentAudio();
+        this.#setMediaSessionPlaying(false);
+
+        this.#countdown = 0;
+        this.#timeRemaining = this.#duration;
+        this.#setPhase('idle');
+        this.#updateMediaSessionPosition();
+        await this.#releaseWakeLock();
+    }
+
+    #setPhase(phase) {
+        const previous = this.#phase;
+        this.#phase = phase;
+        this.#emit('change', { previous });
+    }
+
+    #emit(type, extra = {}) {
+        this.dispatchEvent(new CustomEvent(type, { detail: { ...this.state, ...extra } }));
+    }
+
+    #elapsedSeconds(now) {
+        return (now - this.#meditationStartTime) * this.#speed / 1000;
+    }
+
+    // Wake Lock
+
+    async #requestWakeLock() {
+        try {
+            if ('wakeLock' in navigator) {
+                this.#wakeLock = await navigator.wakeLock.request('screen');
             }
-        }
-
-        #selectDuration(button) {
-            document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
-            button.classList.add('active');
-            this.#selectedDuration = parseInt(button.dataset.duration);
-            this.#timeRemaining = this.#selectedDuration;
-            // Save selected duration to localStorage
-            localStorage.setItem('selectedDuration', this.#selectedDuration);
-            this.#updateTimerDisplay();
-        }
-
-        #updateTimerDisplay() {
-            const minutes = Math.floor(this.#timeRemaining / 60);
-            const seconds = this.#timeRemaining % 60;
-            this.#elements.timer.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-        }
-
-        // Wake Lock
-
-        async #requestWakeLock() {
-            try {
-                if ('wakeLock' in navigator) {
-                    this.#wakeLock = await navigator.wakeLock.request('screen');
-                    console.log('Wake Lock acquired');
-                }
-            } catch (err) {
-                console.log('Wake Lock request failed:', err);
-            }
-        }
-
-        async #releaseWakeLock() {
-            if (this.#wakeLock !== null) {
-                try {
-                    await this.#wakeLock.release();
-                    console.log('Wake Lock released');
-                } catch (err) {
-                    console.log('Wake Lock release failed:', err);
-                }
-                this.#wakeLock = null;
-            }
-        }
-
-        // Visibility
-
-        async #handleVisibilityChange() {
-            if (document.visibilityState !== 'visible') return;
-
-            if (this.#wakeLock !== null) {
-                await this.#requestWakeLock();
-            }
-            this.#syncDisplayOnResume();
-        }
-
-        #syncDisplayOnResume() {
-            if (this.#delayStartTime !== null) {
-                this.#tickCountdown();
-                return;
-            }
-            if (this.#meditationStartTime !== null) {
-                this.#tick();
-                return;
-            }
-            if (!this.#bellSequencePlaying) {
-                // Reload app when returning from background with no active session.
-                // This reinitializes audio context, media session, and service worker
-                // to prevent iOS PWA state degradation after days of inactivity.
-                location.reload();
-            }
-        }
-
-        // Public API
-
-        async start() {
-            this.#resetAudio();
-            this.#setupAudioSession();
-            this.#updateMediaSession();
-            this.#startSilentAudio();
-            await this.#requestWakeLock();
-
-            this.#timeRemaining = this.#selectedDuration;
-            this.#updateTimerDisplay();
-            this.#elements.status.textContent = 'Get ready';
-            this.#setButtonState(true);
-            this.#updateMediaSessionPosition();
-
-            // Show countdown
-            this.#elements.timer.style.display = 'none';
-            this.#delayStartTime = Date.now();
-            this.#elements.countdown.textContent = '5';
-            this.#countdownId = setInterval(() => this.#tickCountdown(), 100);
-        }
-
-        async stop() {
-            console.log('stop')
-            this.#clearAllTimers();
-            this.#resetTimingState();
-            this.#stopAllBells();
-            this.#stopSilentAudio();
-            this.#setMediaSessionPlaying(false);
-            await this.#releaseWakeLock();
-
-            this.#elements.timer.style.display = 'block';
-            this.#elements.countdown.textContent = '';
-            this.#timeRemaining = this.#selectedDuration;
-            this.#updateTimerDisplay();
-            this.#elements.status.textContent = 'Stopped';
-            this.#setButtonState(false);
-            this.#updateMediaSessionPosition();
-        }
-
-        // Audio
-
-        #initAudioContext() {
-            if (!this.#audioContext) {
-                const AudioContext = window.AudioContext || window.webkitAudioContext;
-                this.#audioContext = new AudioContext({latencyHint: 'playback'});
-            }
-            if (this.#audioContext.state === 'suspended') {
-                this.#audioContext.resume();
-            }
-        }
-
-        #startSilentAudio() {
-            this.#initAudioContext();
-
-            this.#oscillator = this.#audioContext.createOscillator();
-            this.#gain = this.#audioContext.createGain();
-
-            this.#oscillator.connect(this.#gain);
-            this.#gain.connect(this.#audioContext.destination);
-
-            this.#gain.gain.setValueAtTime(0.001, this.#audioContext.currentTime);
-            this.#oscillator.frequency.value = MeditationTimer.#SILENT_AUDIO_FREQUENCY_HZ;
-            this.#oscillator.start();
-        }
-
-        #stopSilentAudio() {
-            if (this.#oscillator) {
-                this.#oscillator.stop();
-                this.#oscillator = null;
-                this.#gain = null;
-            }
-        }
-
-        #playBell() {
-            this.#initAudioContext();
-
-            const now = this.#audioContext.currentTime;
-            const ctx = this.#audioContext;
-            const fundamental = MeditationTimer.#BELL_FUNDAMENTAL_HZ;
-
-            this.#createBellPartials(ctx, now, fundamental);
-            this.#createStrikeTransient(ctx, now, fundamental);
-        }
-
-        #createBellPartials(ctx, now, fundamental) {
-            MeditationTimer.#BELL_PARTIALS.forEach(({ ratio, amp, decay }) => {
-                const osc = ctx.createOscillator();
-                const gain = ctx.createGain();
-
-                osc.type = 'sine';
-                osc.frequency.setValueAtTime(fundamental * ratio, now);
-
-                // Slight detuning for natural beating effect
-                const detune = (Math.random() - 0.5) * 4;
-                osc.detune.setValueAtTime(detune, now);
-
-                osc.connect(gain);
-                gain.connect(ctx.destination);
-
-                // Bell envelope: quick attack, long exponential decay
-                gain.gain.setValueAtTime(0, now);
-                gain.gain.linearRampToValueAtTime(amp, now + 0.003);
-                gain.gain.exponentialRampToValueAtTime(0.001, now + decay);
-
-                this.#trackAudioNode(osc);
-                osc.start(now);
-                osc.stop(now + decay + 0.1);
-            });
-        }
-
-        #createStrikeTransient(ctx, now, fundamental) {
-            const strikeLength = 0.08;
-            const bufferSize = ctx.sampleRate * strikeLength;
-            const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-            const data = noiseBuffer.getChannelData(0);
-            for (let i = 0; i < bufferSize; i++) {
-                data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.1));
-            }
-
-            const noise = ctx.createBufferSource();
-            noise.buffer = noiseBuffer;
-
-            const strikeFilter = ctx.createBiquadFilter();
-            strikeFilter.type = 'bandpass';
-            strikeFilter.frequency.value = fundamental * 2;
-            strikeFilter.Q.value = 2;
-
-            const strikeGain = ctx.createGain();
-            strikeGain.gain.setValueAtTime(0.3, now);
-            strikeGain.gain.exponentialRampToValueAtTime(0.001, now + strikeLength);
-
-            noise.connect(strikeFilter);
-            strikeFilter.connect(strikeGain);
-            strikeGain.connect(ctx.destination);
-
-            this.#trackAudioNode(noise);
-            noise.start(now);
-            noise.stop(now + strikeLength);
-        }
-
-        #trackAudioNode(node) {
-            this.#activeNodes.push(node);
-            node.onended = () => {
-                const idx = this.#activeNodes.indexOf(node);
-                if (idx > -1) this.#activeNodes.splice(idx, 1);
-            };
-        }
-
-        #stopAllBells() {
-            // Stop all active audio nodes
-            this.#activeNodes.forEach(node => {
-                try {
-                    node.stop();
-                    node.disconnect();
-                } catch (e) {
-                    // Node may already be stopped
-                }
-            });
-            this.#activeNodes = [];
-
-            // Clear all scheduled bell timeouts
-            this.#bellTimeouts.forEach(id => clearTimeout(id));
-            this.#bellTimeouts = [];
-        }
-
-        #resetAudio() {
-            this.#clearAllTimers();
-            this.#resetTimingState();
-            this.#stopAllBells();
-            this.#stopSilentAudio();
-            this.#setMediaSessionPlaying(false);
-
-            if (this.#audioContext) {
-                this.#audioContext.close();
-                this.#audioContext = null;
-            }
-            this.#initAudioContext();
-        }
-
-        // Media Session
-
-        #setupAudioSession() {
-            if ('audioSession' in navigator) {
-                try {
-                    navigator.audioSession.type = 'playback';
-                } catch (err) {
-                    console.log('Audio Session API setup failed:', err);
-                }
-            }
-        }
-
-        #updateMediaSession() {
-            if (!('mediaSession' in navigator)) return;
-
-            navigator.mediaSession.metadata = new MediaMetadata({
-                title: 'Meditation Timer',
-                artist: 'Ripple',
-                artwork: [{
-                    src: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><circle cx="48" cy="48" r="45" fill="%23667eea"/></svg>',
-                    sizes: '96x96',
-                    type: 'image/svg+xml',
-                }],
-            });
-
-            this.#setMediaSessionPlaying(true);
-            navigator.mediaSession.setActionHandler('play', () => this.start());
-            navigator.mediaSession.setActionHandler('pause', () => this.stop());
-            navigator.mediaSession.setActionHandler('stop', () => this.stop());
-            navigator.mediaSession.setActionHandler('seekto', (i) => console.log('seekto', i));
-        }
-
-        #updateMediaSessionPosition() {
-            if (!('mediaSession' in navigator) || !navigator.mediaSession.setPositionState) return;
-
-            const delaySeconds = MeditationTimer.#COUNTDOWN_DURATION_MS / 1000;
-            const totalDuration = this.#selectedDuration + delaySeconds + MeditationTimer.#BELL_SEQUENCE_DURATION_S;
-
-            let position;
-            if (this.#delayStartTime !== null) {
-                // During delay: position is elapsed time from start
-                position = Math.round((Date.now() - this.#delayStartTime) / 1000);
-            } else {
-                // During meditation: position is delay + elapsed meditation time
-                position = delaySeconds + (this.#selectedDuration - this.#timeRemaining);
-            }
-
-            try {
-                navigator.mediaSession.setPositionState({
-                    duration: totalDuration,
-                    playbackRate: 1,
-                    position: position,
-                });
-            } catch (err) {
-                console.log('setPositionState not supported:', err);
-            }
-        }
-
-        #setMediaSessionPlaying(playing) {
-            if ('mediaSession' in navigator) {
-                navigator.mediaSession.playbackState = playing ? 'playing' : 'none';
-            }
-        }
-
-        // Timer
-
-        #clearAllTimers() {
-            if (this.#intervalId) clearInterval(this.#intervalId);
-            if (this.#countdownId) clearInterval(this.#countdownId);
-            if (this.#completionTimeoutId) clearTimeout(this.#completionTimeoutId);
-            this.#intervalId = null;
-            this.#countdownId = null;
-            this.#completionTimeoutId = null;
-        }
-
-        #resetTimingState() {
-            this.#meditationStartTime = null;
-            this.#completionTimeoutId = null;
-            this.#bellSequencePlaying = false;
-            this.#delayStartTime = null;
-        }
-
-        #tickCountdown() {
-            const elapsed = Date.now() - this.#delayStartTime;
-            const remaining = Math.ceil((MeditationTimer.#COUNTDOWN_DURATION_MS - elapsed) / 1000);
-
-            if (remaining > 0) {
-                this.#elements.countdown.textContent = remaining;
-            } else {
-                clearInterval(this.#countdownId);
-                this.#countdownId = null;
-                this.#elements.timer.style.display = 'block';
-                this.#elements.countdown.textContent = '';
-                this.#delayStartTime = null;
-
-                // Start meditation phase
-                this.#meditationStartTime = Date.now();
-                this.#playBell();
-                this.#elements.status.textContent = 'Timer running...';
-
-                // Schedule completion at correct wall-clock time
-                this.#completionTimeoutId = setTimeout(() => {
-                    if (this.#meditationStartTime !== null) {
-                        this.#timeRemaining = 0;
-                        this.#updateTimerDisplay();
-                        this.#complete();
-                    }
-                }, this.#selectedDuration * 1000);
-
-                this.#intervalId = setInterval(() => this.#tick(), 1000);
-            }
-            this.#updateMediaSessionPosition();
-        }
-
-        #tick() {
-            const elapsed = Math.floor((Date.now() - this.#meditationStartTime) / 1000);
-            this.#timeRemaining = Math.max(0, this.#selectedDuration - elapsed);
-            this.#updateTimerDisplay();
-            this.#updateMediaSessionPosition();
-
-            if (this.#timeRemaining <= 0) {
-                this.#complete();
-            }
-        }
-
-        async #complete() {
-            this.#clearAllTimers();
-            this.#meditationStartTime = null;
-            this.#delayStartTime = null;
-            this.#bellSequencePlaying = true;
-            this.#stopSilentAudio();
-            this.#setMediaSessionPlaying(false);
-
-            this.#elements.timer.textContent = '0:00';
-            this.#elements.status.textContent = 'Time up!';
-            this.#setButtonState(false);
-            this.#updateMediaSessionPosition();
-
-            this.#scheduleCompletionBells();
-        }
-
-        #scheduleCompletionBells() {
-            const interval = MeditationTimer.#BELL_INTERVAL_MS;
-            const count = MeditationTimer.#BELL_COUNT;
-
-            for (let i = 0; i < count; i++) {
-                this.#bellTimeouts.push(
-                    setTimeout(() => this.#playBell(), i * interval)
-                );
-            }
-            this.#bellTimeouts.push(
-                setTimeout(() => this.stop(), count * interval)
-            );
-        }
-
-        // UI
-
-        #setButtonState(running) {
-            this.#elements.startBtn.hidden = running;
-            this.#elements.stopBtn.hidden = !running;
-
-            // Move focus to the newly visible button
-            if (running) {
-                this.#elements.stopBtn.focus();
-            } else {
-                this.#elements.startBtn.focus();
-            }
-
-            // Disable duration buttons when timer is running
-            document.querySelectorAll('.preset-btn').forEach(btn => {
-                btn.disabled = running;
-            });
+        } catch (err) {
+            console.log('Wake Lock request failed:', err);
         }
     }
 
-    new MeditationTimer();
+    async #releaseWakeLock() {
+        if (this.#wakeLock !== null) {
+            try {
+                await this.#wakeLock.release();
+            } catch (err) {
+                console.log('Wake Lock release failed:', err);
+            }
+            this.#wakeLock = null;
+        }
+    }
 
-    if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('sw.js').catch(() => {
+    // Visibility
+
+    async #handleVisibilityChange() {
+        if (document.visibilityState !== 'visible') return;
+
+        if (this.#wakeLock !== null) {
+            await this.#requestWakeLock();
+        }
+        this.#syncDisplayOnResume();
+    }
+
+    #syncDisplayOnResume() {
+        if (this.#delayStartTime !== null) {
+            this.#tickCountdown();
+            return;
+        }
+        if (this.#meditationStartTime !== null) {
+            this.#tick();
+            return;
+        }
+        if (!this.#bellSequencePlaying) {
+            // Reload app when returning from background with no active session.
+            // This reinitializes audio context, media session, and service worker
+            // to prevent iOS PWA state degradation after days of inactivity.
+            location.reload();
+        }
+    }
+
+    // Audio
+
+    #initAudioContext() {
+        if (!this.#audioContext) {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            this.#audioContext = new AudioContext({ latencyHint: 'playback' });
+        }
+        if (this.#audioContext.state === 'suspended') {
+            this.#audioContext.resume();
+        }
+    }
+
+    #startSilentAudio() {
+        this.#initAudioContext();
+
+        this.#oscillator = this.#audioContext.createOscillator();
+        this.#gain = this.#audioContext.createGain();
+
+        this.#oscillator.connect(this.#gain);
+        this.#gain.connect(this.#audioContext.destination);
+
+        this.#gain.gain.setValueAtTime(0.001, this.#audioContext.currentTime);
+        this.#oscillator.frequency.value = MeditationTimer.#SILENT_AUDIO_FREQUENCY_HZ;
+        this.#oscillator.start();
+    }
+
+    #stopSilentAudio() {
+        if (this.#oscillator) {
+            this.#oscillator.stop();
+            this.#oscillator = null;
+            this.#gain = null;
+        }
+    }
+
+    #playBell(kind, index) {
+        this.#initAudioContext();
+
+        const now = this.#audioContext.currentTime;
+        const ctx = this.#audioContext;
+        const fundamental = MeditationTimer.#BELL_FUNDAMENTAL_HZ;
+
+        this.#createBellPartials(ctx, now, fundamental);
+        this.#createStrikeTransient(ctx, now, fundamental);
+        this.#emit('bell', { kind, index });
+    }
+
+    #createBellPartials(ctx, now, fundamental) {
+        MeditationTimer.#BELL_PARTIALS.forEach(({ ratio, amp, decay }) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(fundamental * ratio, now);
+
+            // Slight detuning for natural beating effect
+            const detune = (Math.random() - 0.5) * 4;
+            osc.detune.setValueAtTime(detune, now);
+
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+
+            // Bell envelope: quick attack, long exponential decay
+            gain.gain.setValueAtTime(0, now);
+            gain.gain.linearRampToValueAtTime(amp, now + 0.003);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + decay);
+
+            this.#trackAudioNode(osc);
+            osc.start(now);
+            osc.stop(now + decay + 0.1);
         });
     }
+
+    #createStrikeTransient(ctx, now, fundamental) {
+        const strikeLength = 0.08;
+        const bufferSize = ctx.sampleRate * strikeLength;
+        const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const data = noiseBuffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+            data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.1));
+        }
+
+        const noise = ctx.createBufferSource();
+        noise.buffer = noiseBuffer;
+
+        const strikeFilter = ctx.createBiquadFilter();
+        strikeFilter.type = 'bandpass';
+        strikeFilter.frequency.value = fundamental * 2;
+        strikeFilter.Q.value = 2;
+
+        const strikeGain = ctx.createGain();
+        strikeGain.gain.setValueAtTime(0.3, now);
+        strikeGain.gain.exponentialRampToValueAtTime(0.001, now + strikeLength);
+
+        noise.connect(strikeFilter);
+        strikeFilter.connect(strikeGain);
+        strikeGain.connect(ctx.destination);
+
+        this.#trackAudioNode(noise);
+        noise.start(now);
+        noise.stop(now + strikeLength);
+    }
+
+    #trackAudioNode(node) {
+        this.#activeNodes.push(node);
+        node.onended = () => {
+            const idx = this.#activeNodes.indexOf(node);
+            if (idx > -1) this.#activeNodes.splice(idx, 1);
+        };
+    }
+
+    #stopAllBells() {
+        this.#activeNodes.forEach(node => {
+            try {
+                node.stop();
+                node.disconnect();
+            } catch (e) {
+                // Node may already be stopped
+            }
+        });
+        this.#activeNodes = [];
+
+        this.#bellTimeouts.forEach(id => clearTimeout(id));
+        this.#bellTimeouts = [];
+    }
+
+    #resetAudio() {
+        this.#clearAllTimers();
+        this.#resetTimingState();
+        this.#stopAllBells();
+        this.#stopSilentAudio();
+        this.#setMediaSessionPlaying(false);
+
+        if (this.#audioContext) {
+            this.#audioContext.close();
+            this.#audioContext = null;
+        }
+        this.#initAudioContext();
+    }
+
+    // Media Session
+
+    #setupAudioSession() {
+        if ('audioSession' in navigator) {
+            try {
+                navigator.audioSession.type = 'playback';
+            } catch (err) {
+                console.log('Audio Session API setup failed:', err);
+            }
+        }
+    }
+
+    #updateMediaSession() {
+        if (!('mediaSession' in navigator)) return;
+
+        const fill = encodeURIComponent(this.#artworkColor);
+        navigator.mediaSession.metadata = new MediaMetadata({
+            title: 'Meditation Timer',
+            artist: this.#artist,
+            artwork: [{
+                src: `data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><circle cx="48" cy="48" r="45" fill="${fill}"/></svg>`,
+                sizes: '96x96',
+                type: 'image/svg+xml',
+            }],
+        });
+
+        this.#setMediaSessionPlaying(true);
+        navigator.mediaSession.setActionHandler('play', () => this.start());
+        navigator.mediaSession.setActionHandler('pause', () => this.stop());
+        navigator.mediaSession.setActionHandler('stop', () => this.stop());
+        navigator.mediaSession.setActionHandler('seekto', () => {});
+    }
+
+    #updateMediaSessionPosition() {
+        if (!('mediaSession' in navigator) || !navigator.mediaSession.setPositionState) return;
+
+        const delaySeconds = MeditationTimer.#COUNTDOWN_DURATION_MS / 1000;
+        const totalDuration = this.#duration + delaySeconds + MeditationTimer.#BELL_SEQUENCE_DURATION_S;
+
+        let position;
+        if (this.#delayStartTime !== null) {
+            position = Math.round((Date.now() - this.#delayStartTime) / 1000);
+        } else {
+            position = delaySeconds + (this.#duration - this.#timeRemaining);
+        }
+
+        try {
+            navigator.mediaSession.setPositionState({
+                duration: totalDuration,
+                playbackRate: 1,
+                position: Math.min(position, totalDuration),
+            });
+        } catch (err) {
+            console.log('setPositionState not supported:', err);
+        }
+    }
+
+    #setMediaSessionPlaying(playing) {
+        if ('mediaSession' in navigator) {
+            navigator.mediaSession.playbackState = playing ? 'playing' : 'none';
+        }
+    }
+
+    // Timer
+
+    #clearAllTimers() {
+        if (this.#intervalId) clearInterval(this.#intervalId);
+        if (this.#countdownId) clearInterval(this.#countdownId);
+        if (this.#completionTimeoutId) clearTimeout(this.#completionTimeoutId);
+        this.#intervalId = null;
+        this.#countdownId = null;
+        this.#completionTimeoutId = null;
+    }
+
+    #resetTimingState() {
+        this.#meditationStartTime = null;
+        this.#completionTimeoutId = null;
+        this.#bellSequencePlaying = false;
+        this.#delayStartTime = null;
+    }
+
+    #tickCountdown() {
+        const elapsed = Date.now() - this.#delayStartTime;
+        const remaining = Math.ceil((MeditationTimer.#COUNTDOWN_DURATION_MS - elapsed) / 1000);
+
+        if (remaining > 0) {
+            if (remaining !== this.#countdown) {
+                this.#countdown = remaining;
+                this.#emit('tick');
+            }
+        } else {
+            clearInterval(this.#countdownId);
+            this.#countdownId = null;
+            this.#countdown = 0;
+            this.#delayStartTime = null;
+
+            // Start meditation phase
+            this.#meditationStartTime = Date.now();
+            this.#setPhase('running');
+            this.#playBell('start', 0);
+
+            // Schedule completion at correct wall-clock time
+            this.#completionTimeoutId = setTimeout(() => {
+                if (this.#meditationStartTime !== null) {
+                    this.#timeRemaining = 0;
+                    this.#complete();
+                }
+            }, this.#duration * 1000 / this.#speed);
+
+            this.#intervalId = setInterval(() => this.#tick(), Math.max(100, 1000 / this.#speed));
+        }
+        this.#updateMediaSessionPosition();
+    }
+
+    #tick() {
+        const elapsed = Math.floor(this.#elapsedSeconds(Date.now()));
+        const remaining = Math.max(0, this.#duration - elapsed);
+        const changed = remaining !== this.#timeRemaining;
+        this.#timeRemaining = remaining;
+        if (changed) this.#emit('tick');
+        this.#updateMediaSessionPosition();
+
+        if (this.#timeRemaining <= 0) {
+            this.#complete();
+        }
+    }
+
+    #complete() {
+        this.#clearAllTimers();
+        this.#meditationStartTime = null;
+        this.#delayStartTime = null;
+        this.#bellSequencePlaying = true;
+        this.#stopSilentAudio();
+        this.#setMediaSessionPlaying(false);
+
+        this.#timeRemaining = 0;
+        this.#setPhase('complete');
+        this.#updateMediaSessionPosition();
+
+        this.#scheduleCompletionBells();
+    }
+
+    #scheduleCompletionBells() {
+        const interval = MeditationTimer.#BELL_INTERVAL_MS;
+        const count = MeditationTimer.#BELL_COUNT;
+
+        for (let i = 0; i < count; i++) {
+            this.#bellTimeouts.push(
+                setTimeout(() => this.#playBell('end', i), i * interval)
+            );
+        }
+        this.#bellTimeouts.push(
+            setTimeout(() => this.stop(), count * interval)
+        );
+    }
+}
+const timer = new MeditationTimer({ artist: 'Ripple', artworkColor: '#7fe3da' });
+window.timer = timer;
+
+const DEG = Math.PI / 180;
+const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
+
+// Integer hash -> [0, 1). Rain and ridges come from it, so every frame is
+// a pure function of time and the still frame is the same on every load.
+function hash(k, s) {
+    let x = Math.imul((k | 0) ^ Math.imul(s | 0, 0x9E3779B1), 0x85EBCA6B);
+    x ^= x >>> 13; x = Math.imul(x, 0xC2B2AE35); x ^= x >>> 16;
+    return (x >>> 0) / 4294967296;
+}
+function vnoise1(x, s) {
+    const i = Math.floor(x), f = x - i, u = f * f * (3 - 2 * f);
+    return hash(i, s) * (1 - u) + hash(i + 1, s) * u;
+}
+function vnoise2(x, y, s) {
+    const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
+    const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+    const h = (i, j) => hash((xi + i) * 73856093 ^ (yi + j) * 19349663, s);
+    return (h(0, 0) * (1 - u) + h(1, 0) * u) * (1 - v) + (h(0, 1) * (1 - u) + h(1, 1) * u) * v;
+}
+
+/* ------------------------------------------------------------------
+ * Water: the lake is one fragment pass. Each pixel casts a ray from a camera
+ * pitched 58 degrees down onto the plane z = 0, sums the slope of every live
+ * ripple packet there, reflects the ray off the tilted normal and looks the
+ * result up in a sky baked once (dusk gradient, moonlit cloud, two ridges),
+ * plus an analytic moon. Rings therefore show as bent reflections, never as
+ * drawn circles. Main-thread cost per frame is packing ten uniforms.
+ * ------------------------------------------------------------------ */
+const Water = (() => {
+    const canvas = document.getElementById('water');
+    const MAXD = 10;
+    const cam = { P: 58 * DEG, T: Math.tan(27 * DEG), A: 1 };
+    const E0 = 30 * DEG; // the sky texture spans elevations E0..90 deg, remapped to 0..1
+    const T0 = 1000;     // time offset so the rain schedule never indexes negative slots
+    const TAU = Math.PI * 2;
+    const SWELL = [[0.571, 1.3], [0.757, 4.1], [1.03, 2.2], [1.571, 0.7], [1.848, 5.3]]; // rad/s, phase offset
+    let gl = null, loc = {}, ok = false, still = false, skyKey = '';
+    let cssW = 1, cssH = 1, scale = 1, dial = { x: 0, y: 0, r: 140 };
+    let moon = [0, 0.5, 0.85], moonAz = 0, moonVe = 0.15, moonAt = [0.73, 0.155];
+    let rainLevel = 1, rainTarget = 1;
+    const DA = new Float32Array(MAXD * 4), DB = new Float32Array(MAXD * 4);
+    const events = [];
+
+    const VERT = 'attribute vec2 a;void main(){gl_Position=vec4(a,0.0,1.0);}';
+    const FRAG = `
+precision highp float;
+uniform vec2 uRes;
+uniform vec4 uPhA;  // swell phases, wrapped to 0..2pi on the CPU in double precision
+uniform float uPhB;
+uniform vec3 uCam;
+uniform float uScale;
+uniform vec3 uMoon;
+uniform float uSwell;
+uniform vec4 uDA[10];
+uniform vec4 uDB[10];
+uniform sampler2D uSky;
+
+vec2 ground(vec2 frag, out vec3 d) {
+    vec2 n = frag / uRes * 2.0 - 1.0;
+    float s = sin(uCam.z), c = cos(uCam.z);
+    d = normalize(vec3(n.x * uCam.x * uCam.y, c + n.y * uCam.x * s, -s + n.y * uCam.x * c));
+    return d.xy * (uScale / -d.z);
+}
+float hash(vec2 p) {
+    vec3 q = fract(vec3(p.xyx) * 0.1031);
+    q += dot(q, q.yzx + 33.33);
+    return fract((q.x + q.y) * q.z);
+}
+void wave(inout vec2 g, vec2 p, vec2 dir, float k, float slope, float phase, float px) {
+    float aa = smoothstep(2.2, 4.5, 6.2832 / (k * px));
+    g += dir * (slope * aa * cos(dot(dir, p) * k - phase));
+}
+void main() {
+    vec3 d, dn;
+    vec2 p = ground(gl_FragCoord.xy, d);
+    vec2 pn = ground(gl_FragCoord.xy + vec2(0.0, 1.0), dn);
+    float px = max(length(pn - p), 0.001);
+
+    // Breath of wind: long, slow swells that only bend the moon's reflection.
+    vec2 g = vec2(0.0);
+    wave(g, p, vec2(0.2079, 0.9781), 0.0393, 0.0062 * uSwell, uPhA.x, px);
+    wave(g, p, vec2(-0.3746, 0.9272), 0.0628, 0.0045 * uSwell, uPhA.y, px);
+    wave(g, p, vec2(0.4384, 0.8988), 0.1083, 0.0035 * uSwell, uPhA.z, px);
+    wave(g, p, vec2(-0.1219, 0.9925), 0.2618, 0.004 * uSwell, uPhA.w, px);
+    wave(g, p, vec2(0.1392, 0.9903), 0.3696, 0.0035 * uSwell, uPhB, px);
+
+    for (int i = 0; i < 10; i++) {
+        vec4 A = uDA[i];
+        vec4 B = uDB[i];
+        if (B.y <= 0.0) continue;
+        vec2 dv = p - A.xy;
+        float dist = length(dv) + 0.001;
+        float x = dist - A.z;
+        float sig = A.w;
+        if (x > 2.6 * sig || x < -3.2 * sig) continue;
+        float is2 = 1.0 / (sig * sig);
+        float env = exp(-x * x * is2);
+        float k = B.x;
+        float aa = smoothstep(2.2, 4.5, 6.2832 / (k * px));
+        float dh = B.y * aa * env * inversesqrt(1.0 + dist * 0.03) * (k * cos(k * x) - 2.0 * x * is2 * sin(k * x));
+        g += dh * (dv / dist);
+    }
+
+    vec3 n = normalize(vec3(-g, 1.0));
+    vec3 r = reflect(d, n);
+    float az = atan(r.x, r.y);
+    float el = asin(clamp(r.z, 0.0, 1.0));
+    float ve = clamp((el - 0.5236) / 1.0472, 0.0, 1.0);
+    vec3 sky = texture2D(uSky, vec2(0.5 + az * 0.5, 1.0 - ve)).rgb;
+
+    float ang = acos(clamp(dot(r, uMoon), -1.0, 1.0));
+    sky += vec3(0.74, 0.82, 0.86) * (1.0 - smoothstep(0.0095, 0.0195, ang));
+    sky += vec3(0.48, 0.72, 0.76) * (0.16 * exp(-ang * 70.0) + 0.2 * exp(-ang * 24.0) + 0.08 * exp(-ang * 6.5));
+
+    float ci = clamp(-dot(d, n), 0.0, 1.0);
+    float fr = 0.74 + 0.26 * pow(1.0 - ci, 4.0);
+    vec3 col = mix(vec3(0.006, 0.020, 0.030), sky, fr);
+
+    vec2 uv = gl_FragCoord.xy / uRes;
+    vec2 q = (uv - vec2(0.5, 0.46)) * vec2(uCam.y, 1.0) / max(uCam.y, 1.0);
+    col *= 1.0 - 0.32 * smoothstep(0.32, 0.95, length(q) * 1.15);
+    col *= 1.0 - 0.4 * smoothstep(0.86, 1.0, uv.y); // keeps header text and the status bar legible
+
+    col += (hash(gl_FragCoord.xy) + hash(gl_FragCoord.xy + 19.19) - 1.0) / 255.0;
+    gl_FragColor = vec4(col, 1.0);
+}`;
+
+    // Mirrors ground() in the shader exactly; drops are placed with it.
+    function ray(sx, sy) {
+        const nx = 2 * sx / cssW - 1, ny = 1 - 2 * sy / cssH;
+        const s = Math.sin(cam.P), c = Math.cos(cam.P);
+        const x = nx * cam.T * cam.A, y = c + ny * cam.T * s, z = -s + ny * cam.T * c;
+        const l = Math.hypot(x, y, z);
+        return [x / l, y / l, z / l];
+    }
+    function world(sx, sy) {
+        const d = ray(sx, sy), t = scale / -d[2];
+        return [d[0] * t, d[1] * t];
+    }
+
+    function compile(type, src) {
+        const sh = gl.createShader(type);
+        gl.shaderSource(sh, src);
+        gl.compileShader(sh);
+        if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh));
+        return sh;
+    }
+
+    function init() {
+        ok = false;
+        gl = canvas.getContext('webgl', { alpha: false, antialias: false, depth: false, stencil: false, premultipliedAlpha: false, powerPreference: 'low-power' });
+        if (!gl) return;
+        try {
+            const prog = gl.createProgram();
+            gl.attachShader(prog, compile(gl.VERTEX_SHADER, VERT));
+            gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FRAG));
+            gl.linkProgram(prog);
+            if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+            gl.useProgram(prog);
+            const buf = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+            const a = gl.getAttribLocation(prog, 'a');
+            gl.enableVertexAttribArray(a);
+            gl.vertexAttribPointer(a, 2, gl.FLOAT, false, 0, 0);
+            for (const n of ['uRes', 'uPhA', 'uPhB', 'uCam', 'uScale', 'uMoon', 'uSwell', 'uDA', 'uDB', 'uSky']) loc[n] = gl.getUniformLocation(prog, n);
+            const tex = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, tex);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            gl.uniform1i(loc.uSky, 0);
+            skyKey = '';
+            ok = true;
+        } catch (err) {
+            console.warn('Water shader unavailable, painting a still lake instead:', err.message);
+            gl = null;
+        }
+    }
+
+    // The sky as the lake sees it. Rows run from the zenith (top) down to the
+    // remapped horizon (bottom), columns span azimuth -1..1 rad. It is painted at
+    // quarter size and smoothed up: soft silhouettes keep a ridge from aliasing
+    // into stair steps once waves bend it. No stars: ripples split them into dust.
+    function bakeSky() {
+        const W = 1024, H = 512, w = 256, h = 128;
+        const soft = document.createElement('canvas');
+        soft.width = w; soft.height = h;
+        const c = soft.getContext('2d');
+        // Stops by remapped elevation: the last light sits just above the ridges.
+        const grad = c.createLinearGradient(0, 0, 0, h);
+        [[1, '#02050c'], [0.7, '#040c1a'], [0.5, '#071627'], [0.36, '#0b2534'], [0.23, '#113844'], [0.13, '#1a505a'], [0.06, '#24656f'], [0, '#2a6f78']]
+            .forEach(([ve, col]) => grad.addColorStop(1 - ve, col));
+        c.fillStyle = grad;
+        c.fillRect(0, 0, w, h);
+
+        const mu = 0.5 + moonAz * 0.5, mv = 1 - moonVe;
+        // A faint moonlit veil high overhead: the lower screen mirrors the zenith, and
+        // without some texture there a ripple has nothing to bend.
+        const veil = c.createRadialGradient(mu * w, 0.06 * h, 0, mu * w, 0.06 * h, w * 0.42);
+        veil.addColorStop(0, 'rgba(70, 108, 128, .16)');
+        veil.addColorStop(1, 'rgba(70, 108, 128, 0)');
+        c.fillStyle = veil;
+        c.fillRect(0, 0, w, h);
+        const haze = c.createRadialGradient(mu * w, mv * h, 0, mu * w, mv * h, w * 0.34);
+        haze.addColorStop(0, 'rgba(150, 196, 204, .22)');
+        haze.addColorStop(0.3, 'rgba(110, 160, 172, .08)');
+        haze.addColorStop(1, 'rgba(110, 160, 172, 0)');
+        c.fillStyle = haze;
+        c.fillRect(0, 0, w, h);
+
+        // Moonlit wisps low in the sky, faint cirrus high up: value-noise fBM, lit
+        // where it passes the moon. The cirrus is what lets rain read in the dark
+        // lower half of the screen, which mirrors the zenith.
+        const im = c.getImageData(0, 0, w, h);
+        for (let y = 0; y < h; y++) {
+            const ve = 1 - y / h;
+            const band = smooth(0.06, 0.18, ve) * (1 - smooth(0.38, 0.66, ve));
+            const high = smooth(0.42, 0.62, ve) * 0.55;
+            for (let x = 0; x < w; x++) {
+                const u = x / w;
+                let n = 0, amp = 0.5, f = 1, norm = 0;
+                for (let o = 0; o < 5; o++) { n += amp * vnoise2(u * 5 * f, ve * 12 * f, 31 + o); norm += amp; amp *= 0.5; f *= 2.07; }
+                const dens = smooth(0.5, 0.78, n / norm) * Math.max(band, high);
+                const dx = (u - mu) * 1.9, dy = y / h - mv;
+                const prox = Math.exp(-(dx * dx + dy * dy) / 0.03);
+                const al = dens * (0.1 + 0.36 * prox);
+                const i = (y * w + x) * 4;
+                im.data[i] += (96 + 130 * prox - im.data[i]) * al;
+                im.data[i + 1] += (126 + 106 * prox - im.data[i + 1]) * al;
+                im.data[i + 2] += (146 + 92 * prox - im.data[i + 2]) * al;
+            }
+        }
+        c.putImageData(im, 0, 0);
+
+        // Two ridges; a saddle opens where the moon rises.
+        const ridge = (base, amp, freq, seed, dipW) => {
+            c.beginPath();
+            c.moveTo(0, h);
+            for (let x = 0; x <= w; x += 0.5) {
+                const u = x / w;
+                let s = 0, a = 0.5, f = 1, norm = 0;
+                for (let o = 0; o < 6; o++) { s += a * vnoise1(u * freq * f, seed + o); norm += a; a *= 0.48; f *= 2.1; }
+                const dip = 1 - 0.6 * Math.exp(-Math.pow((u - mu) / dipW, 2));
+                c.lineTo(x, h * (1 - (base + amp * Math.pow(s / norm, 1.25)) * dip));
+            }
+            c.lineTo(w, h);
+            c.closePath();
+        };
+        ridge(0.035, 0.085, 7, 3, 0.07);
+        const far = c.createLinearGradient(0, h * 0.8, 0, h);
+        far.addColorStop(0, '#0a1f29');
+        far.addColorStop(1, '#0d2a33');
+        c.fillStyle = far;
+        c.fill();
+        const rim = c.createRadialGradient(mu * w, mv * h, 0, mu * w, mv * h, w * 0.15);
+        rim.addColorStop(0, 'rgba(176, 222, 226, .45)');
+        rim.addColorStop(1, 'rgba(176, 222, 226, 0)');
+        c.strokeStyle = rim;
+        c.lineWidth = 0.7;
+        c.stroke();
+        ridge(0.012, 0.055, 4.2, 17, 0.05);
+        c.fillStyle = '#03070c';
+        c.fill();
+
+        const cv = document.createElement('canvas');
+        cv.width = W; cv.height = H;
+        const out = cv.getContext('2d');
+        out.imageSmoothingEnabled = true;
+        out.imageSmoothingQuality = 'high';
+        out.drawImage(soft, 0, 0, W, H);
+        return cv;
+    }
+
+    function uploadSky() {
+        const key = `${moonAz.toFixed(3)}:${moonVe.toFixed(3)}`;
+        if (key === skyKey) return;
+        skyKey = key;
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, bakeSky());
+    }
+
+    function layout(d) {
+        cssW = Math.max(1, innerWidth);
+        cssH = Math.max(1, innerHeight);
+        cam.A = cssW / cssH;
+        dial = d;
+        scale = 1;
+        const a = world(d.x, d.y), b = world(d.x + 1, d.y);
+        scale = 1 / Math.hypot(b[0] - a[0], b[1] - a[1]);
+        // Solve the moon from where its reflection should sit on screen.
+        const portrait = cssW < cssH;
+        moonAt = [portrait ? 0.73 : 0.7, portrait ? 0.155 : 0.17];
+        const m = ray(cssW * moonAt[0], cssH * moonAt[1]);
+        moon = [m[0], m[1], -m[2]];
+        moonAz = Math.atan2(moon[0], moon[1]);
+        moonVe = (Math.asin(moon[2]) - E0) / (90 * DEG - E0);
+        const q = Math.min(0.62, Math.sqrt(300000 / (cssW * cssH)));
+        canvas.width = Math.max(2, Math.round(cssW * q));
+        canvas.height = Math.max(2, Math.round(cssH * q));
+        if (ok) {
+            gl.viewport(0, 0, canvas.width, canvas.height);
+            uploadSky();
+            gl.uniform2f(loc.uRes, canvas.width, canvas.height);
+            gl.uniform3f(loc.uCam, cam.T, cam.A, cam.P);
+            gl.uniform1f(loc.uScale, scale);
+            gl.uniform3f(loc.uMoon, moon[0], moon[1], moon[2]);
+        } else {
+            paintFallback();
+        }
+    }
+
+    // Without WebGL the lake is one painted still: the baked sky, mirrored.
+    function paintFallback() {
+        const c = canvas.getContext('2d');
+        if (!c) return;
+        const sky = bakeSky();
+        const half = Math.atan(cam.T * cam.A) / 2;
+        c.save();
+        c.translate(0, canvas.height);
+        c.scale(1, -1);
+        const v0 = 0.08 * sky.height;
+        c.drawImage(sky, (0.5 - half) * sky.width, v0, 2 * half * sky.width, sky.height - v0, 0, 0, canvas.width, canvas.height);
+        c.restore();
+        const mx = canvas.width * moonAt[0], my = canvas.height * moonAt[1], mr = canvas.height * 0.016;
+        const halo = c.createRadialGradient(mx, my, 0, mx, my, mr * 9);
+        halo.addColorStop(0, 'rgba(122, 184, 194, .3)');
+        halo.addColorStop(1, 'rgba(122, 184, 194, 0)');
+        c.fillStyle = halo;
+        c.fillRect(0, 0, canvas.width, canvas.height);
+        c.fillStyle = 'rgba(196, 214, 222, .95)';
+        c.beginPath();
+        c.arc(mx, my, mr, 0, Math.PI * 2);
+        c.fill();
+        const scrim = c.createLinearGradient(0, 0, 0, canvas.height * 0.14);
+        scrim.addColorStop(0, 'rgba(2, 5, 11, .4)');
+        scrim.addColorStop(1, 'rgba(2, 5, 11, 0)');
+        c.fillStyle = scrim;
+        c.fillRect(0, 0, canvas.width, canvas.height * 0.14);
+    }
+
+    function pack(n, sx, sy, kind, age, amp) {
+        const w = world(sx, sy);
+        let rf, sig, k, A;
+        if (kind === 'bell') {
+            rf = 56 * age; sig = 18 + 5 * age; k = 0.2;
+            A = amp * 3 * Math.exp(-age / 8.5) * smooth(0, 0.6, age);
+        } else if (kind === 'touch') {
+            rf = 30 * age; sig = 7 + 3 * age; k = 0.46;
+            A = amp * 0.5 * Math.exp(-age / 1.8) * smooth(0, 0.2, age);
+        } else {
+            rf = 21 * age; sig = 5 + 2.4 * age; k = 0.6;
+            A = amp * 0.44 * Math.exp(-age / 2.6) * smooth(0, 0.25, age);
+        }
+        DA[n * 4] = w[0]; DA[n * 4 + 1] = w[1]; DA[n * 4 + 2] = rf; DA[n * 4 + 3] = sig;
+        DB[n * 4] = k; DB[n * 4 + 1] = A;
+        return n + 1;
+    }
+
+    // Rain is a schedule, not a simulation: slot k may hold one drop whose time
+    // and place come from hash(k), so any t can be drawn without history.
+    const SLOT = 1.35, LIFE = 8;
+    function rain(t, n) {
+        const k1 = Math.floor((t - LIFE) / SLOT), k2 = Math.floor(t / SLOT);
+        for (let k = k2; k >= k1 && n < MAXD; k--) {
+            if (hash(k, 1) > 0.5) continue;
+            const age = t - (k + hash(k, 2)) * SLOT;
+            if (age < 0 || age > LIFE) continue;
+            const sx = (0.04 + 0.92 * hash(k, 3)) * cssW, sy = (0.13 + 0.85 * hash(k, 4)) * cssH;
+            if (Math.hypot(sx - dial.x, sy - dial.y) < dial.r * 0.9) continue;
+            n = pack(n, sx, sy, 'rain', age, (0.55 + 0.45 * hash(k, 5)) * rainLevel);
+        }
+        return n;
+    }
+
+    function draw(t, live) {
+        if (!ok) return;
+        DB.fill(0);
+        let n = 0;
+        if (live) {
+            for (let i = events.length - 1; i >= 0; i--) {
+                const e = events[i], age = t - e.t0;
+                if (age > (e.kind === 'bell' ? 18 : 5)) { events.splice(i, 1); continue; }
+                if (age >= 0 && n < MAXD) n = pack(n, e.sx, e.sy, e.kind, age, e.amp);
+            }
+        }
+        rain(t, n);
+        const swell = 0.72 + 0.28 * Math.sin(t * 2 * Math.PI / 47) - 0.17 * Math.cos(t * 2 * Math.PI / 83); // a breeze comes and goes
+        const ph = SWELL.map(([w, p0]) => ((w * t - p0) % TAU + TAU) % TAU);
+        gl.uniform4f(loc.uPhA, ph[0], ph[1], ph[2], ph[3]);
+        gl.uniform1f(loc.uPhB, ph[4]);
+        gl.uniform1f(loc.uSwell, swell);
+        gl.uniform4fv(loc.uDA, DA);
+        gl.uniform4fv(loc.uDB, DB);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+
+    const STILL_T = T0 + 17.5; // the designed still: a whole moon, one raindrop ring beside the knob
+    canvas.addEventListener('webglcontextlost', e => { e.preventDefault(); ok = false; });
+    canvas.addEventListener('webglcontextrestored', () => { init(); layout(dial); if (still) draw(STILL_T, false); });
+
+    return {
+        init,
+        layout(d) { layout(d); if (still) draw(STILL_T, false); },
+        get ok() { return ok; },
+        setStill(v) { still = v; if (v) draw(STILL_T, false); },
+        setSession(busy) { rainTarget = busy ? 0.55 : 1; },
+        frame(now, dt) {
+            rainLevel += (rainTarget - rainLevel) * (1 - Math.exp(-dt / 3));
+            draw(now / 1000 + T0, true);
+        },
+        bell(now) { events.push({ sx: dial.x, sy: dial.y, t0: now / 1000 + T0, kind: 'bell', amp: 1 }); },
+        touch(now, sx, sy) { events.push({ sx, sy, t0: now / 1000 + T0, kind: 'touch', amp: 1 }); },
+    };
+})();
+
+/* ------------------------------------------------------------------
+ * Dial: drawn on a 2D canvas in viewBox units (360 across, ring radius 146),
+ * redrawn only when something on it changes. A canvas is one texture to the
+ * compositor, never re-tiled, so a still dial stays bit-identical.
+ * ------------------------------------------------------------------ */
+const R = 146, VB = 360, TAU = Math.PI * 2, TOP = -Math.PI / 2;
+const AQUA = '#7fe3da';
+const FONT = getComputedStyle(document.documentElement).getPropertyValue('--sans');
+const DISPLAY = getComputedStyle(document.documentElement).getPropertyValue('--display');
+const q = sel => document.querySelector(sel);
+const el = {
+    body: document.body,
+    clock: document.getElementById('clock'),
+    baseline: q('#clock .baseline'),
+    mm: q('#clock .mm'),
+    ss: q('#clock .ss'),
+    countdown: document.getElementById('countdown'),
+    status: document.getElementById('status'),
+    label: q('.phase-label'),
+    sumN: q('.sum-n'),
+    start: document.getElementById('startBtn'),
+    stop: document.getElementById('stopBtn'),
+    presets: document.getElementById('presetButtons'),
+    dial: document.getElementById('dial'),
+    wrap: q('.dial-wrap'),
+    still: document.getElementById('stillBtn'),
+    bubble: q('.bubble'),
+};
+
+const Dial = (() => {
+    const canvas = q('.dial-canvas');
+    const ctx = canvas.getContext('2d');
+    let unit = 1, gWell, gRing, gHalo;
+    const radial = (r, stops) => {
+        const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+        stops.forEach(([o, c]) => g.addColorStop(o, c));
+        return g;
+    };
+    function resize() {
+        const px = Math.max(2, Math.round(el.wrap.getBoundingClientRect().width * Math.min(2, devicePixelRatio || 1)));
+        canvas.width = canvas.height = px;
+        unit = px / VB;
+        gWell = radial(172, [[0, 'rgba(2, 5, 11, .62)'], [0.62, 'rgba(2, 5, 11, .36)'], [1, 'rgba(2, 5, 11, 0)']]);
+        gRing = radial(176, [[0.72, 'rgba(159, 240, 232, 0)'], [0.8, 'rgba(159, 240, 232, .35)'], [0.83, 'rgba(201, 248, 242, .9)'], [0.86, 'rgba(159, 240, 232, .35)'], [0.97, 'rgba(159, 240, 232, 0)']]);
+        gHalo = radial(1, [[0, 'rgba(127, 227, 218, .42)'], [0.45, 'rgba(127, 227, 218, .12)'], [1, 'rgba(127, 227, 218, 0)']]);
+    }
+    // The numerals, laid out where the transparent #clock box sits: centred on it, on the
+    // baseline its zero-height marker reports, digits in equal cells (tabular).
+    let cells = { size: 0 };
+    function digitCells(size) {
+        if (cells.size === size) return cells;
+        const widest = () => Math.max(...[...'0123456789'].map(d => ctx.measureText(d).width));
+        ctx.font = `200 ${size}px ${DISPLAY}`;
+        const big = widest();
+        ctx.font = `200 ${size / 2}px ${DISPLAY}`;
+        cells = { size, big, small: widest(), colon: ctx.measureText(':').width };
+        return cells;
+    }
+    function drawClock(text, alpha, secAlpha) {
+        const box = el.clock.getBoundingClientRect(), own = canvas.getBoundingClientRect();
+        if (alpha < 0.005 || !box.height || !own.width) return;
+        const k = canvas.width / own.width, size = parseFloat(getComputedStyle(el.clock).fontSize) * k;
+        const c = digitCells(size);
+        const i = text.indexOf(':'), mm = text.slice(0, i), ss = text.slice(i + 1);
+        const gap = 0.02 * size;
+        let x = (box.left + box.width / 2 - own.left) * k - (mm.length * c.big + gap + c.colon + ss.length * c.small) / 2;
+        const base = (el.baseline.getBoundingClientRect().top - own.top) * k;
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'alphabetic';
+        ctx.globalAlpha = 1;
+        ctx.font = `200 ${size}px ${DISPLAY}`;
+        ctx.fillStyle = `rgba(227, 235, 239, ${alpha.toFixed(3)})`;
+        for (const d of mm) { ctx.fillText(d, x + c.big / 2, base); x += c.big; }
+        x += gap;
+        ctx.font = `200 ${size / 2}px ${DISPLAY}`;
+        ctx.fillStyle = `rgba(227, 235, 239, ${secAlpha.toFixed(3)})`;
+        ctx.fillText(':', x + c.colon / 2, base);
+        x += c.colon;
+        for (const d of ss) { ctx.fillText(d, x + c.small / 2, base); x += c.small; }
+    }
+    const arc = (r, a0, a1) => { ctx.beginPath(); ctx.arc(0, 0, r, TOP + a0, TOP + a1); };
+    const disc = (x, y, r) => { ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); };
+    function glowDisc(x, y, r, alpha) {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.scale(r, r);
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = gHalo;
+        disc(0, 0, 1);
+        ctx.fill();
+        ctx.restore();
+    }
+    function stroke(color, width, alpha) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = width;
+        ctx.globalAlpha = alpha;
+        ctx.stroke();
+    }
+
+    // v carries every visible quantity; see frame() for where each comes from.
+    function draw(v) {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.setTransform(unit, 0, 0, unit, canvas.width / 2, canvas.height / 2);
+        ctx.lineCap = 'round';
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = gWell;
+        disc(0, 0, 172);
+        ctx.fill();
+
+        if (v.focus) {
+            ctx.setLineDash([1.5, 5.5]);
+            disc(0, 0, 175);
+            stroke('#b6f4ed', 1.4, 0.9);
+            ctx.setLineDash([]);
+        }
+        if (v.ticks > 0.005) {
+            for (let m = 0; m < 60; m++) {
+                const preset = m === 5 || m === 10 || m === 15 || m === 20, five = m % 5 === 0;
+                const on = m === 0 ? v.minutes === 60 : m <= v.minutes;
+                const r1 = R - 7, r0 = r1 - (preset ? 15 : five ? 10 : 5);
+                const s = Math.sin(m * 6 * DEG), c = -Math.cos(m * 6 * DEG);
+                ctx.beginPath();
+                ctx.moveTo(r0 * s, r0 * c);
+                ctx.lineTo(r1 * s, r1 * c);
+                const alpha = on ? (preset ? 0.8 : five ? 0.78 : 0.5) : (preset ? 0.72 : five ? 0.4 : 0.22);
+                stroke(on ? (preset ? '#a9f2ea' : AQUA) : '#e3ebef', preset ? 1.5 : five ? 1.15 : 1, alpha * v.ticks);
+            }
+        }
+        if (v.ticks > 0.005) {
+            // Quarter-hour bezel numerals outside the ring: the face reads as minutes.
+            ctx.font = `500 9.5px ${FONT}`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = '#e3ebef';
+            for (const m of [15, 30, 45, 60]) {
+                const a = m * 6 * DEG;
+                ctx.globalAlpha = 0.5 * v.ticks;
+                ctx.fillText(String(m), 162 * Math.sin(a), -162 * Math.cos(a) + 0.5);
+            }
+        }
+        disc(0, 0, R);
+        stroke('#e3ebef', 1.2, 0.17);
+
+        if (v.glow > 0.003) {
+            ctx.globalAlpha = v.glow;
+            ctx.fillStyle = gRing;
+            disc(0, 0, 176);
+            ctx.fill();
+        }
+        if (v.arc > 0.005 && v.arcDeg > 0.6) {
+            const a1 = v.arcDeg * DEG;
+            arc(R, 0, a1);
+            stroke(AQUA, 11, 0.1 * v.arc);
+            stroke(AQUA, 2.6, v.arc);
+        }
+        if (v.segs > 0.005) {
+            v.segFill.forEach((f, i) => {
+                if (f <= 0) return;
+                const a0 = (i * 72 + 4) * DEG;
+                arc(R, a0, a0 + 64 * DEG * f);
+                stroke(AQUA, 11, 0.1 * f * v.segs);
+                stroke(AQUA, 2.6, (0.4 + 0.6 * f) * v.segs);
+            });
+        }
+        if (v.quads > 0.005) {
+            v.quad.forEach((qd, j) => {
+                if (!qd) return;
+                const a0 = (j * 90 + 3) * DEG;
+                arc(R, a0, a0 + 84 * DEG);
+                stroke(AQUA, 7, qd.glow * v.quads);
+                stroke('#e9f3f5', 1.6, qd.line * v.quads);
+            });
+        }
+        if (v.snap > 0.005) {
+            const s = Math.sin(v.snapMin * 6 * DEG), c = -Math.cos(v.snapMin * 6 * DEG);
+            ctx.beginPath();
+            ctx.moveTo(139 * s, 139 * c);
+            ctx.lineTo(118 * s, 118 * c);
+            stroke('#b6f4ed', 2, v.snap);
+        }
+        const a = v.arcDeg * DEG, x = R * Math.sin(a), y = -R * Math.cos(a);
+        if (v.knob > 0.005) {
+            glowDisc(x, y, v.grab ? 34 : 28, v.knob);
+            disc(x, y, 13);
+            stroke(AQUA, 1, 0.55 * v.knob);
+            ctx.globalAlpha = v.knob;
+            ctx.fillStyle = '#eef4f6';
+            disc(x, y, 8);
+            ctx.fill();
+        }
+        if (v.bead > 0.005) {
+            glowDisc(x, y, 27 + 5 * v.breath, (0.75 + 0.25 * v.breath) * v.bead);
+            ctx.globalAlpha = 0.32 * v.bead;
+            ctx.fillStyle = AQUA;
+            disc(x, y, 8.5);
+            ctx.fill();
+            ctx.globalAlpha = v.bead;
+            ctx.fillStyle = '#f6fcfc';
+            disc(x, y, 4.3);
+            ctx.fill();
+        }
+        drawClock(v.clockText, v.clock, v.secs);
+        ctx.globalAlpha = 1;
+    }
+    return { resize, draw };
+})();
+
+const presetButtons = MeditationTimer.PRESETS.map(seconds => {
+    const button = document.createElement('button');
+    button.className = 'chip';
+    button.dataset.duration = seconds;
+    button.innerHTML = `<span class="n">${seconds / 60}</span><span class="u">min</span>`;
+    button.setAttribute('aria-label', `Set meditation duration to ${seconds / 60} minutes`);
+    button.addEventListener('click', () => timer.setDuration(seconds));
+    el.presets.append(button);
+    return button;
+});
+
+const minutesText = m => `${m} ${m === 1 ? 'minute' : 'minutes'}`;
+const busy = phase => phase === 'getready' || phase === 'running';
+let minutes = clamp(Math.round(timer.duration / 60), 1, 60);
+let summary = false;
+let completeAt = 0;
+let snapAt = -1e9, snapMin = 0;
+let focusRing = false;
+const bells = [];
+
+function syncSlider() {
+    minutes = clamp(Math.round(timer.duration / 60), 1, 60);
+    el.dial.setAttribute('aria-valuenow', minutes);
+    el.dial.setAttribute('aria-valuetext', minutesText(minutes));
+}
+
+const LABEL = { idle: 'Ready', getready: 'Get ready', running: 'Remaining', complete: 'Complete' };
+
+function render(state, previous) {
+    const phase = state.phase;
+    el.body.dataset.phase = phase;
+    el.body.dataset.summary = String(phase === 'complete' && summary);
+    el.start.hidden = busy(phase);
+    el.stop.hidden = !busy(phase);
+    presetButtons.forEach(b => {
+        b.disabled = busy(phase);
+        b.setAttribute('aria-pressed', String(Number(b.dataset.duration) === state.duration));
+    });
+    el.dial.setAttribute('aria-disabled', String(busy(phase)));
+    el.countdown.textContent = phase === 'getready' ? state.countdown : '';
+    el.label.textContent = LABEL[phase];
+    el.sumN.textContent = Math.round(state.duration / 60);
+    syncSlider();
+    if (previous !== undefined && previous !== phase) {
+        if (phase === 'getready') el.status.textContent = 'Get ready';
+        else if (phase === 'running') el.status.textContent = `Session started, ${minutesText(minutes)}`;
+        else if (phase === 'complete') el.status.textContent = `Session complete, ${minutesText(minutes)}`;
+        else el.status.textContent = busy(previous) ? 'Stopped' : 'Ready';
+    }
+}
+
+timer.addEventListener('change', ({ detail }) => {
+    const wasBusy = busy(detail.previous);
+    const isBusy = busy(detail.phase);
+    if (detail.phase === 'complete' && detail.previous !== 'complete') {
+        summary = true;
+        completeAt = performance.now();
+    } else if (detail.phase === 'complete') {
+        summary = false; // the duration changed while the bells ring: show the new setting
+    } else {
+        summary = false;
+    }
+    render(detail, detail.previous);
+    Water.setSession(isBusy);
+    if (isBusy !== wasBusy) (isBusy ? el.stop : el.start).focus();
+    kick();
+});
+timer.addEventListener('tick', ({ detail }) => { el.countdown.textContent = detail.phase === 'getready' ? detail.countdown : ''; });
+timer.addEventListener('bell', ({ detail }) => {
+    const now = performance.now();
+    bells.push({ t: now, kind: detail.kind, index: detail.index });
+    if (bells.length > 8) bells.shift();
+    if (!still) Water.bell(now);
+    kick();
+});
+el.start.addEventListener('click', () => timer.start());
+document.addEventListener('touchstart', () => {}, { passive: true }); // lets iOS apply :active
+el.stop.addEventListener('click', () => timer.stop());
+
+/* ---------- Direct manipulation ---------- */
+let drag = null;
+function polar(e) {
+    const b = el.dial.getBoundingClientRect();
+    const dx = e.clientX - (b.left + b.width / 2), dy = e.clientY - (b.top + b.height / 2);
+    let deg = Math.atan2(dx, -dy) / DEG;
+    if (deg < 0) deg += 360;
+    return { raw: deg / 6, r: Math.hypot(dx, dy) / (b.width * R / VB) };
+}
+function setMinutes(m, feedback) {
+    m = clamp(m, 1, 60);
+    if (m === minutes) return;
+    timer.setDuration(m * 60);
+    if (feedback) {
+        snapAt = performance.now();
+        snapMin = m;
+        if (navigator.vibrate) navigator.vibrate(4);
+    }
+    kick();
+}
+// Absolute angle with seam pinning: crossing 12 o'clock clockwise holds 60,
+// counter-clockwise holds 1, and the knob only lets go once the finger is back on it.
+function dragTo(raw) {
+    const prev = drag.prev;
+    drag.prev = raw;
+    if (drag.pinned === 'max') {
+        if (raw >= 59 || (prev < 15 && raw > 45)) drag.pinned = null;
+        else return setMinutes(60, true);
+    } else if (drag.pinned === 'min') {
+        if (raw <= 1.5 || (prev > 45 && raw < 15)) drag.pinned = null;
+        else return setMinutes(1, true);
+    } else if (prev > 45 && raw < 15) {
+        drag.pinned = 'max';
+        return setMinutes(60, true);
+    } else if (prev < 15 && raw > 45) {
+        drag.pinned = 'min';
+        return setMinutes(1, true);
+    }
+    setMinutes(Math.round(raw), true);
+}
+function showBubble(e) {
+    if (!drag || drag.type === 'mouse') return;
+    el.bubble.textContent = `${minutes} min`;
+    const w = el.bubble.offsetWidth, h = el.bubble.offsetHeight;
+    const x = clamp(e.clientX - w / 2, 8, innerWidth - w - 8), y = Math.max(8, e.clientY - h - 54);
+    el.bubble.style.transform = `translate(${x}px, ${y}px)`;
+    el.bubble.classList.add('on');
+}
+el.dial.addEventListener('pointerdown', e => {
+    if (busy(timer.phase) || e.button > 0) return;
+    const { raw, r } = polar(e);
+    if (r < 0.42) return;
+    e.preventDefault();
+    el.dial.setPointerCapture(e.pointerId);
+    if (e.pointerType !== 'touch') el.dial.focus({ preventScroll: true }); // keys can follow a click; a touch needs no ring
+    el.dial.classList.add('dragging');
+    el.body.classList.add('dragging');
+    summary = false;
+    el.body.dataset.summary = 'false';
+    drag = { id: e.pointerId, prev: raw, pinned: null, type: e.pointerType };
+    setMinutes(Math.round(raw), true);
+    if (!still) Water.touch(performance.now(), e.clientX, e.clientY);
+    showBubble(e);
+    kick();
+});
+el.dial.addEventListener('pointermove', e => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const { raw, r } = polar(e);
+    if (r < 0.3) return; // the angle is unstable this close to the centre
+    dragTo(raw);
+    showBubble(e);
+});
+const endDrag = e => {
+    if (!drag || e.pointerId !== drag.id) return;
+    drag = null;
+    el.dial.classList.remove('dragging');
+    el.body.classList.remove('dragging');
+    el.bubble.classList.remove('on');
+    kick();
+};
+el.dial.addEventListener('pointerup', endDrag);
+el.dial.addEventListener('pointercancel', endDrag);
+el.dial.addEventListener('lostpointercapture', endDrag);
+el.dial.addEventListener('keydown', e => {
+    focusRing = el.dial.matches(':focus-visible'); // a click focuses without a ring; a key shows it
+    kick();
+    if (busy(timer.phase)) return;
+    let m = minutes;
+    switch (e.key) {
+        case 'ArrowRight': case 'ArrowUp': m += 1; break;
+        case 'ArrowLeft': case 'ArrowDown': m -= 1; break;
+        case 'PageUp': m = Math.floor(m / 5) * 5 + 5; break;
+        case 'PageDown': m = Math.ceil(m / 5) * 5 - 5; break;
+        case 'Home': m = 1; break;
+        case 'End': m = 60; break;
+        default: return;
+    }
+    e.preventDefault();
+    summary = false;
+    setMinutes(m, true);
+});
+el.dial.addEventListener('focus', () => { focusRing = el.dial.matches(':focus-visible'); kick(); });
+el.dial.addEventListener('blur', () => { focusRing = false; kick(); });
+
+/* ---------- Still background ---------- */
+const STILL_KEY = 'stillBackground';
+const reduce = matchMedia('(prefers-reduced-motion: reduce)');
+const stored = localStorage.getItem(STILL_KEY);
+let still = stored === null ? reduce.matches : stored === 'true';
+function setStill(v, persist) {
+    still = v;
+    if (persist) localStorage.setItem(STILL_KEY, String(v));
+    el.still.setAttribute('aria-pressed', String(v));
+    Water.setStill(v);
+    kick();
+}
+el.still.addEventListener('click', () => setStill(!still, true));
+reduce.addEventListener('change', () => { if (localStorage.getItem(STILL_KEY) === null) setStill(reduce.matches, false); });
+
+/* ---------- Layout ---------- */
+let dirty = true;
+function layout() {
+    const b = el.wrap.getBoundingClientRect();
+    Water.layout({ x: b.left + b.width / 2, y: b.top + b.height / 2, r: b.width * R / VB });
+    Dial.resize();
+    dirty = true;
+}
+addEventListener('resize', () => { layout(); kick(); });
+
+/* ---------- One frame loop ---------- */
+let raf = 0, lastFrame = performance.now(), lastWater = -1e9, lastKey = '', lastDraw = -1e9;
+let arcDeg = minutes * 6, shown = '';
+const ease = t => 1 - Math.pow(1 - t, 3);
+const bellEnvelope = age => smooth(0, 0.45, age) * Math.exp(-age / 2.6); // soft swell, ~6 s decay
+
+// Which dial layers each phase shows; layers cross-fade over about 0.9 s.
+function layerTargets(phase) {
+    const setting = phase === 'idle' || (phase === 'complete' && !summary);
+    return {
+        ticks: setting ? 1 : 0,
+        knob: setting ? 1 : 0,
+        arc: phase === 'getready' ? 0 : 1,
+        segs: phase === 'getready' ? 1 : 0,
+        bead: phase === 'running' ? 1 : 0,
+        quads: phase === 'complete' ? 1 : 0,
+        // Numerals recede while running and wait at .6 during get-ready; seconds always dimmer.
+        clock: phase === 'complete' && summary ? 0 : phase === 'running' ? 0.84 : phase === 'getready' ? 0.6 : 1,
+        secs: phase === 'complete' && summary ? 0 : phase === 'running' ? 0.47 : phase === 'getready' ? 0.36 : 0.6,
+    };
+}
+const layers = layerTargets(timer.phase);
+
+function frame(now) {
+    raf = 0;
+    const dt = Math.min(0.1, Math.max(0, (now - lastFrame) / 1000));
+    lastFrame = now;
+    const phase = timer.phase;
+    let moving = !still || busy(phase) || drag !== null;
+
+    // Arc: idle shows the setting on a 60-minute face; running shows what is left of the session.
+    let target = minutes * 6;
+    if (phase === 'running') target = 360 * (1 - timer.progressAt());
+    else if (phase === 'complete' && summary) target = 0;
+    else if (phase === 'getready') target = 360;
+    if (phase === 'running' || phase === 'getready' || drag) arcDeg = target;
+    else arcDeg += (target - arcDeg) * (1 - Math.exp(-dt / 0.12));
+    if (Math.abs(target - arcDeg) < 0.05) arcDeg = target; else moving = true;
+
+    const goal = layerTargets(phase), k = 1 - Math.exp(-dt / 0.28);
+    for (const name in layers) {
+        layers[name] += (goal[name] - layers[name]) * k;
+        if (Math.abs(goal[name] - layers[name]) < 0.004) layers[name] = goal[name]; else moving = true;
+    }
+
+    // Get-ready: five segments, one per second, each eased in like an inhale.
+    let glow = 0;
+    const segFill = [0, 0, 0, 0, 0];
+    if (phase === 'getready') {
+        const cp = timer.countdownProgressAt() * 5;
+        for (let i = 0; i < 5; i++) segFill[i] = ease(clamp((cp - i) / 0.8, 0, 1));
+        glow = 0.16 * Math.pow(Math.sin(Math.PI * (cp % 1)), 2);
+    }
+    // Bells: each strike swells the ring; end bells light one quadrant each.
+    for (const b of bells) {
+        const age = (now - b.t) / 1000;
+        if (age < 8) glow += 0.32 * bellEnvelope(age);
+    }
+    glow = Math.min(0.5, glow);
+    if (glow > 0.002) moving = true;
+    const quad = [null, null, null, null];
+    if (phase === 'complete') {
+        for (let j = 0; j < 4; j++) {
+            const b = bells.find(x => x.kind === 'end' && x.index === j && x.t >= completeAt - 50);
+            if (!b) continue;
+            const age = (now - b.t) / 1000;
+            quad[j] = { line: 0.95 * smooth(0, 0.8, age), glow: 0.06 + 0.22 * bellEnvelope(age) };
+            if (age < 8) moving = true;
+        }
+    }
+    const snap = 0.95 * Math.max(0, 1 - (now - snapAt) / 380);
+    if (snap > 0) moving = true;
+    // The bead breathes on a ten-second cycle while the session runs (0.1 Hz).
+    const breath = phase === 'running' && !still ? 0.5 + 0.5 * Math.sin(now / 1000 * 2 * Math.PI / 10) : 0.5;
+
+    // Clock: m:ss, seconds demoted. In complete it shows the next session's length.
+    const clockText = MeditationTimer.format(phase === 'complete' ? timer.duration : timer.remainingAt());
+    if (clockText !== shown) {
+        shown = clockText;
+        const i = clockText.indexOf(':');
+        el.mm.textContent = clockText.slice(0, i);
+        el.ss.textContent = clockText.slice(i);
+    }
+
+    const v = {
+        arcDeg, minutes, glow, segFill, quad, snap, snapMin, breath, clockText,
+        focus: focusRing, grab: drag !== null, ...layers,
+    };
+    // Redraw on change only; in session the arc moves under a pixel a second, so 15 fps is plenty.
+    const key = JSON.stringify(v);
+    const gap = drag ? 0 : phase === 'running' && glow < 0.01 ? 66 : 16;
+    if (dirty || (key !== lastKey && now - lastDraw >= gap)) {
+        lastDraw = now;
+        Dial.draw(v);
+        lastKey = key;
+        dirty = false;
+    }
+
+    // Water at ~30 fps (25 fps in session), throttled by timestamp, never frame count.
+    if (!still && Water.ok && now - lastWater >= (busy(phase) ? 39 : 29)) {
+        lastWater = now;
+        Water.frame(now, dt);
+    }
+    if (moving) kick();
+}
+function kick() { if (!raf) raf = requestAnimationFrame(frame); }
+
+Water.init();
+layout();
+document.fonts?.ready.then(() => { dirty = true; kick(); }); // canvas numerals need the face loaded
+render(timer.state);
+el.still.setAttribute('aria-pressed', String(still));
+Water.setStill(still);
+kick();
+
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(() => {
+    });
+}
 </script>
 </body>
 </html>

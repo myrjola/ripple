@@ -69,3 +69,197 @@ fieldset {
     border: 0;
 }
 
+/* Still Water */
+
+:root {
+    --ink: #050913;
+    --silver: #e3ebef;
+    --silver-2: rgba(227, 235, 239, .68);
+    --silver-3: rgba(227, 235, 239, .6);
+    --hair: rgba(227, 235, 239, .2);
+    --aqua: #7fe3da;
+    --aqua-hi: #b6f4ed;
+    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Helvetica Neue", Lato, system-ui, sans-serif;
+    --display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI Variable Display", "Helvetica Neue", Lato, system-ui, sans-serif;
+}
+html { background: var(--ink); height: 100%; }
+body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+    line-height: normal; /* the labels and dial readout are set to normal leading */
+    color: var(--silver);
+    font-family: var(--sans);
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+}
+[hidden] { display: none !important; }
+
+/* Water and the session veil: the veil is one compositor-only opacity layer
+   that lowers the scene's luminance while a session runs. */
+#water { position: fixed; inset: 0; width: 100%; height: 100%; display: block; background: var(--ink); }
+.veil {
+    position: fixed; inset: 0; pointer-events: none; background: #02050b;
+    opacity: 0; transition: opacity 3s ease;
+}
+body[data-phase="getready"] .veil { opacity: .14; }
+body[data-phase="running"] .veil { opacity: .44; transition-duration: 20s; }
+body[data-phase="complete"] .veil { opacity: 0; transition-duration: 9s; }
+
+.app {
+    --S: min(100vw, 100dvh - 290px, 560px);
+    position: relative;
+    z-index: 1;
+    height: 100vh;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    padding: max(6px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
+}
+
+/* Header. Its marks are CSS rings and a text glyph, not SVG: small vector
+   paths re-rasterise unevenly under GPU raster. */
+.top {
+    flex: none; height: 52px;
+    display: flex; align-items: center; justify-content: space-between;
+}
+body[data-phase="getready"] .brand, body[data-phase="running"] .brand { opacity: .45; }
+.brand {
+    display: flex; align-items: center; gap: 12px; padding-left: 8px;
+    font-size: 12px; font-weight: 500; letter-spacing: .44em; text-transform: uppercase;
+    color: rgba(227, 235, 239, .9);
+    transition: opacity 2.4s ease;
+}
+.mark { position: relative; flex: none; width: 20px; height: 20px; border-radius: 50%; border: 1px solid rgba(127, 227, 218, .38); }
+.mark::before, .mark::after { content: ""; position: absolute; border-radius: 50%; }
+.mark::before { inset: 3.5px; border: 1px solid rgba(127, 227, 218, .75); }
+.mark::after { inset: 7.5px; background: var(--aqua); }
+.still {
+    height: 44px; min-width: 44px; padding: 0 14px 0 12px; border-radius: 22px;
+    display: inline-flex; align-items: center; gap: 9px;
+    border: 1px solid transparent; background: transparent; color: rgba(227, 235, 239, .9);
+    font: inherit; font-size: 11px; font-weight: 500; letter-spacing: .26em; text-transform: uppercase;
+    cursor: pointer; transition: border-color .4s, color .4s;
+}
+.glyph { font-size: 19px; line-height: 1; letter-spacing: 0; width: 18px; text-align: center; margin-top: -2px; }
+.glyph::before { content: "\2248"; }
+.still[aria-pressed="true"] { border-color: var(--hair); color: var(--silver); }
+.still[aria-pressed="true"] .glyph::before { content: "="; }
+
+/* Stage: dial and presets travel together as the setting unit */
+.main { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; }
+.stage { flex: 1; min-height: 0; width: 100%; padding-top: 10dvh; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.dial-wrap {
+    position: relative; flex: none;
+    width: var(--S); height: var(--S);
+    container-type: inline-size;
+}
+#dial {
+    position: absolute; inset: 0; border-radius: 50%;
+    touch-action: none; outline: none; cursor: grab;
+}
+#dial[aria-disabled="true"] { cursor: default; }
+#dial.dragging { cursor: grabbing; }
+.dial-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+.readout {
+    position: absolute; inset: 0; pointer-events: none;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center;
+}
+.phase-label, .sub {
+    font-size: clamp(10.5px, 2.85cqi, 14px); font-weight: 500;
+    letter-spacing: .34em; text-transform: uppercase;
+    color: var(--silver-2);
+    text-indent: .34em; /* balances the trailing tracking so the word centres */
+    white-space: nowrap;
+}
+.sub { color: var(--silver-3); letter-spacing: .28em; text-indent: .28em; min-height: 1.5em; }
+#clock, .summary {
+    font-family: var(--display); font-weight: 200;
+    font-size: 23cqi; line-height: 1; letter-spacing: -.015em;
+    font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1, "lnum" 1;
+    margin: 2.4cqi 0 2.8cqi;
+}
+/* The dial canvas paints the numerals (large glyphs are paths, and painted paths
+   re-rasterise unevenly); this box keeps the layout and what a screen reader reads. */
+#clock, #clock .ss { color: transparent; }
+#clock .ss { font-size: .5em; letter-spacing: 0; margin-left: .04em; }
+.baseline { display: inline-block; width: 0; height: 0; vertical-align: baseline; }
+.summary { display: none; }
+.summary .u {
+    font-family: var(--sans); font-size: .17em; font-weight: 500; letter-spacing: .3em;
+    text-transform: uppercase; color: var(--silver-2); margin-left: .5em; vertical-align: .55em;
+}
+body[data-summary="true"] .summary { display: block; }
+body[data-summary="true"] #clock { display: none; }
+.count-wrap, .sub-text { display: none; }
+body[data-phase="idle"] .sub-text { display: inline; }
+body.dragging .sub-text { visibility: hidden; }
+.hint-keys { display: none; }
+#dial:focus-visible ~ .readout .hint-keys { display: inline; }
+#dial:focus-visible ~ .readout .hint-touch { display: none; }
+body[data-phase="getready"] .count-wrap { display: inline; }
+#countdown { color: var(--silver); }
+
+/* Presets */
+.presets { flex: none; margin-top: 4px; transition: opacity .9s ease, visibility 0s; }
+body[data-phase="getready"] .presets, body[data-phase="running"] .presets {
+    opacity: 0; visibility: hidden; transition: opacity .9s ease, visibility 0s .9s;
+}
+#presetButtons { display: flex; gap: 10px; justify-content: center; }
+.chip {
+    min-width: 64px; height: 44px; padding: 0 14px; border-radius: 22px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+    border: 1px solid var(--hair); background: rgba(3, 8, 16, .34); color: var(--silver-2);
+    font: inherit; cursor: pointer;
+    transition: border-color .35s, background-color .35s, color .35s;
+}
+.chip .n { font-family: var(--display); font-size: 17px; font-weight: 300; font-variant-numeric: tabular-nums; color: var(--silver); transition: color .35s; }
+.chip .u { font-size: 9.5px; font-weight: 500; letter-spacing: .2em; text-transform: uppercase; padding-top: 2px; }
+.chip[aria-pressed="true"] { border-color: rgba(127, 227, 218, .72); background: rgba(127, 227, 218, .09); color: var(--aqua); }
+.chip[aria-pressed="true"] .n { color: var(--aqua-hi); }
+.chip:disabled { cursor: default; }
+.chip:active { background: rgba(127, 227, 218, .16); }
+
+/* Session controls */
+.controls { flex: none; display: flex; justify-content: center; padding-top: 16px; }
+.btn {
+    height: 56px; min-width: 210px; padding: 0 40px; border-radius: 28px;
+    font: inherit; font-size: 13px; font-weight: 600; letter-spacing: .34em; text-indent: .34em;
+    text-transform: uppercase; cursor: pointer;
+}
+.btn.primary { background: var(--silver); color: #06111a; border: 0; }
+.btn.primary:active { background: #c9d6dc; }
+.btn.ghost:active { background: rgba(227, 235, 239, .1); }
+.btn.ghost { background: rgba(3, 8, 16, .4); color: rgba(227, 235, 239, .84); border: 1px solid rgba(227, 235, 239, .3); }
+.btn:focus-visible, .chip:focus-visible, .still:focus-visible { outline: 2px solid var(--aqua-hi); outline-offset: 3px; }
+
+.bubble {
+    position: fixed; z-index: 3; left: 0; top: 0;
+    padding: 7px 14px; border-radius: 18px;
+    background: rgba(5, 12, 20, .84); border: 1px solid rgba(127, 227, 218, .4);
+    color: var(--silver); font-size: 15px; font-variant-numeric: tabular-nums; white-space: nowrap;
+    pointer-events: none; opacity: 0; transition: opacity .15s;
+}
+.bubble.on { opacity: 1; }
+
+/* Short landscape phones: the dial on the left, everything else on the right */
+@media (orientation: landscape) and (max-height: 520px) {
+    .app { --S: min(100dvh - 64px, 56vw); }
+    .main { flex-direction: row; justify-content: center; align-items: center; gap: 5vw; }
+    .stage { flex: none; width: auto; padding-top: 0; flex-direction: row; gap: 4vw; }
+    .presets { margin-top: 0; }
+    #presetButtons { flex-direction: column; }
+    .controls { padding-top: 0; }
+}
+/* Desktop: the setting unit and the action sit together in the middle of the lake */
+@media (min-width: 900px) and (min-height: 620px) {
+    .app { --S: min(100dvh - 300px, 600px); padding: 22px 34px 28px; }
+    .main { justify-content: center; }
+    .stage { flex: none; padding-top: 0; }
+    .controls { padding-top: 26px; }
+}
