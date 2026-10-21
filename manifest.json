@@ -19,14 +19,26 @@
   ],
   "icons": [
     {
-      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' fill='%23071118'/><circle cx='96' cy='96' r='66' fill='none' stroke='%237fe3da' stroke-opacity='.45' stroke-width='4'/><circle cx='96' cy='96' r='42' fill='none' stroke='%237fe3da' stroke-opacity='.85' stroke-width='4'/><circle cx='96' cy='96' r='17' fill='%237fe3da'/></svg>",
+      "src": "icon-192.png",
       "sizes": "192x192",
-      "type": "image/svg+xml",
+      "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' fill='%23071118'/><circle cx='256' cy='256' r='176' fill='none' stroke='%237fe3da' stroke-opacity='.45' stroke-width='10'/><circle cx='256' cy='256' r='112' fill='none' stroke='%237fe3da' stroke-opacity='.85' stroke-width='10'/><circle cx='256' cy='256' r='45' fill='%237fe3da'/></svg>",
+      "src": "icon-512.png",
       "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icon.svg",
+      "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any"
     }
