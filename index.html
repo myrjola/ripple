@@ -640,6 +640,15 @@ uniform vec4 uDA[10];
 uniform vec4 uDB[10];
 uniform sampler2D uSky;
 
+// How much x changes across one pixel; 0 without the derivatives extension.
+float perPixel(float x) {
+#ifdef DERIVATIVES
+    return fwidth(x);
+#else
+    return 0.0;
+#endif
+}
+
 vec2 ground(vec2 frag, out vec3 d) {
     vec2 n = frag / uRes * 2.0 - 1.0;
     float s = sin(uCam.z), c = cos(uCam.z);
@@ -693,9 +702,18 @@ void main() {
     float ve = clamp((el - 0.5236) / 1.0472, 0.0, 1.0);
     vec3 sky = texture2D(uSky, vec2(0.5 + az * 0.5, 1.0 - ve)).rgb;
 
+    // The moon's edge and halos widen by how much the angle to it changes across
+    // one pixel: the disc gets a one-pixel soft edge in every direction, and where
+    // ripples swing the reflection faster than the disc is wide, it dims to an
+    // even glow, keeping its total light, instead of scattering into specks.
     float ang = acos(clamp(dot(r, uMoon), -1.0, 1.0));
-    sky += vec3(0.74, 0.82, 0.86) * (1.0 - smoothstep(0.0095, 0.0195, ang));
-    sky += vec3(0.48, 0.72, 0.76) * (0.16 * exp(-ang * 70.0) + 0.2 * exp(-ang * 24.0) + 0.08 * exp(-ang * 6.5));
+    float fw = perPixel(ang);
+    float disc = (1.0 - smoothstep(0.0095 - fw, 0.0195 + fw, ang)) * 0.00066 / (0.00066 + 0.75 * fw * fw);
+    sky += vec3(0.74, 0.82, 0.86) * disc;
+    vec3 width = vec3(1.0 / 70.0, 1.0 / 24.0, 1.0 / 6.5);
+    vec3 spread = width + 0.5 * fw;
+    vec3 halo = vec3(0.16, 0.2, 0.08) * exp(-ang / spread) * (width / spread) * (width / spread);
+    sky += vec3(0.48, 0.72, 0.76) * (halo.x + halo.y + halo.z);
 
     float ci = clamp(-dot(d, n), 0.0, 1.0);
     float fr = 0.74 + 0.26 * pow(1.0 - ci, 4.0);
@@ -738,7 +756,8 @@ void main() {
         try {
             const prog = gl.createProgram();
             gl.attachShader(prog, compile(gl.VERTEX_SHADER, VERT));
-            gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FRAG));
+            const derivatives = gl.getExtension('OES_standard_derivatives') ? '#extension GL_OES_standard_derivatives : enable\n#define DERIVATIVES\n' : '';
+            gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, derivatives + FRAG));
             gl.linkProgram(prog);
             if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
             gl.useProgram(prog);
@@ -751,7 +770,12 @@ void main() {
             for (const n of ['uRes', 'uPhA', 'uPhB', 'uCam', 'uScale', 'uMoon', 'uSwell', 'uDA', 'uDB', 'uSky']) loc[n] = gl.getUniformLocation(prog, n);
             const tex = gl.createTexture();
             gl.bindTexture(gl.TEXTURE_2D, tex);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            // Mipmapped, so where ripples squeeze the reflection the sky is averaged
+            // instead of sampled into shimmer; anisotropic where supported, so a
+            // reflection squeezed only vertically stays sharp across.
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+            const aniso = gl.getExtension('EXT_texture_filter_anisotropic');
+            if (aniso) gl.texParameterf(gl.TEXTURE_2D, aniso.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(8, gl.getParameter(aniso.MAX_TEXTURE_MAX_ANISOTROPY_EXT)));
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
@@ -863,6 +887,7 @@ void main() {
         if (key === skyKey) return;
         skyKey = key;
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, bakeSky());
+        gl.generateMipmap(gl.TEXTURE_2D);
     }
 
     function layout(d) {
@@ -880,7 +905,9 @@ void main() {
         moon = [m[0], m[1], -m[2]];
         moonAz = Math.atan2(moon[0], moon[1]);
         moonVe = (Math.asin(moon[2]) - E0) / (90 * DEG - E0);
-        const q = Math.min(0.62, Math.sqrt(300000 / (cssW * cssH)));
+        // One shaded pixel per CSS pixel on a phone; bigger screens stop at about
+        // 600k pixels, the CSS upscale softening what the lake barely needs.
+        const q = Math.min(1, Math.sqrt(600000 / (cssW * cssH)));
         canvas.width = Math.max(2, Math.round(cssW * q));
         canvas.height = Math.max(2, Math.round(cssH * q));
         if (ok) {
@@ -1038,7 +1065,7 @@ const Dial = (() => {
         return g;
     };
     function resize() {
-        const px = Math.max(2, Math.round(el.wrap.getBoundingClientRect().width * Math.min(2, devicePixelRatio || 1)));
+        const px = Math.max(2, Math.round(el.wrap.getBoundingClientRect().width * Math.min(3, devicePixelRatio || 1)));
         canvas.width = canvas.height = px;
         unit = px / VB;
         gWell = radial(172, [[0, 'rgba(2, 5, 11, .62)'], [0.62, 'rgba(2, 5, 11, .36)'], [1, 'rgba(2, 5, 11, 0)']]);
